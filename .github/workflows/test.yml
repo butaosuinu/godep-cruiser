@@ -1,0 +1,41 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go-unit:
+    name: Go unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Run Go unit tests
+        run: make test
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        # version-file needs golangci-lint-action >= v9.2.0
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version-file: .golangci-lint-version

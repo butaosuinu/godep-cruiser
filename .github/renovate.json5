@@ -1,0 +1,66 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":configMigration",
+    "schedule:weekly"
+  ],
+  "timezone": "Asia/Tokyo",
+  "enabledManagers": ["gomod", "github-actions", "custom.regex"],
+  "ignoreScripts": true,
+  "prConcurrentLimit": 3,
+  "prHourlyLimit": 1,
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Dependency Dashboard",
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "vulnerabilityFixStrategy": "lowest"
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 8am on monday"]
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update the pinned golangci-lint version",
+      "managerFilePatterns": ["/^\\.golangci-lint-version$/"],
+      "matchStrings": ["(?<currentValue>v\\d+\\.\\d+\\.\\d+)\\s*"],
+      "depNameTemplate": "golangci/golangci-lint",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "Apply cooldown to public non-npm release datasources",
+      "matchDatasources": ["go", "github-releases", "github-tags"],
+      "minimumReleaseAge": "3 days",
+      "minimumReleaseAgeBehaviour": "timestamp-required",
+      "internalChecksFilter": "strict"
+    },
+    {
+      "description": "Run go mod tidy for Go module updates",
+      "matchManagers": ["gomod"],
+      "postUpdateOptions": ["gomodTidy"]
+    },
+    {
+      "description": "Group non-major Go module updates",
+      "matchManagers": ["gomod"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Go modules"
+    },
+    {
+      "description": "Group non-major GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Require dashboard approval for major updates",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}

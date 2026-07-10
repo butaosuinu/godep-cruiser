@@ -1,0 +1,148 @@
+# golangci-lint v2 設定(v2.12.2 / config schema v2)。
+#
+# 不採用 linter と根拠:
+# - gosec: scanner が任意パスの .go を読むのが本質の設計なので、G304
+#   (変数由来のファイル読み込み)が構造的に常時誤検出になる
+# - exhaustruct: Rule 設定構造体は optional フィールド主体で、全フィールド
+#   明示を強制する方針と真逆
+# - gochecknoglobals: ldflags 注入の version・コンパイル済み regexp・
+#   予約テーブル等の package-level var が正当
+# - funlen / gocognit / cyclop: しきい値系はコード規模を計測する前に入れると
+#   ノイズになるので採らない(必要になってから局所導入する)
+# - lll / nlreturn / wsl_v5 / varnamelen / err113 / mnd / depguard / dupl /
+#   contextcheck: コミュニティ合意でノイズ
+# - forcetypeassert: errcheck の check-type-assertions で代替
+# - prealloc / perfsprint: 計測なし最適化
+# - ireturn: reporter factory が interface(Reporter 等)を返す設計と非両立
+
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: standard            # errcheck / govet / ineffassign / staticcheck / unused
+  enable:
+    # バグ検出
+    - bodyclose                # HTTP レスポンス Body の Close 漏れ
+    - copyloopvar              # Go 1.22+ で不要なループ変数コピー
+    - durationcheck
+    - errorlint                # errors.Is/As 不使用の比較・型アサーション
+    - exhaustive               # enum switch の網羅性
+    - makezero
+    - nilerr
+    - nilnesserr
+    - reassign
+    # コード品質
+    - gocritic                 # 既定チェックのみ。experimental は opt-in しない
+    - intrange                 # for i := range n
+    - modernize                # 新しい標準イディオムへの追従(回帰防止)
+    - predeclared
+    - unconvert
+    - unparam
+    - usestdlibvars
+    # スタイル(低ノイズのみ)
+    - misspell                 # CLI のユーザー向け文言が多いため採用
+    - revive                   # 厳選 rules + 公開 API のドキュメント強制(下記 settings)
+    # テスト品質
+    - thelper
+    - usetesting               # tenv の後継
+    # 運用ガード(現状違反ゼロのラチェット)
+    - gochecknoinits           # 現在 init() は 0 件
+    - nolintlint               # nolint に理由と linter 指定を必須化
+  settings:
+    errcheck:
+      check-type-assertions: true
+      # std-error-handling preset は使わない: 書き込みパスの defer f.Close()
+      # のような実害ケースを検出対象に残すため。fmt 出力系のみ精密除外。
+      exclude-functions:
+        - fmt.Print
+        - fmt.Printf
+        - fmt.Println
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (*strings.Builder).WriteString
+        - (*strings.Builder).WriteByte
+        - (*strings.Builder).WriteRune
+        - (*bytes.Buffer).WriteString
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    staticcheck:
+      # v2.12.2 デフォルトの明示(将来のデフォルト変更に左右されない)
+      checks: ["all", "-ST1000", "-ST1003", "-ST1016", "-ST1020", "-ST1021", "-ST1022"]
+    exhaustive:
+      default-signifies-exhaustive: true
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: early-return
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        # exported / package-comments: importable library として公開 API に
+        # ドキュメントコメントを強制する。実装で苦痛ならこの 2 つだけ外す。
+        - name: exported
+        - name: package-comments
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+    nolintlint:
+      allow-unused: false
+      require-explanation: true
+      require-specific: true
+  exclusions:
+    generated: lax
+    warn-unused: true
+    presets:
+      - comments
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - unparam
+    paths:
+      # testdata/ は golangci-lint がデフォルト除外なので、既知違反を仕込んだ
+      # testdata module 群の置き場に使える。ここは worktree/キャッシュのみ
+      # 明示除外(パス指定実行・エディタ統合の事故防止)。
+      - \.fanout/
+      - \.cache/
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      module-path: github.com/butaosuinu/godep-cruiser
+      extra-rules: false
+    goimports:
+      local-prefixes:
+        - github.com/butaosuinu/godep-cruiser
+  exclusions:
+    generated: lax
+    paths:
+      - \.fanout/
+      - \.cache/
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
