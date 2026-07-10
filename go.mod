@@ -1,6 +1,6 @@
 module github.com/butaosuinu/godep-cruiser
 
-go 1.25
+go 1.25.0
 
 tool golang.org/x/vuln/cmd/govulncheck
 
