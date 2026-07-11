@@ -97,6 +97,7 @@ func readModulePath(file *os.File) (string, error) {
 		if lineNumber == 1 {
 			line = strings.TrimPrefix(line, "\ufeff")
 		}
+		line, _, _ = strings.Cut(line, "//")
 
 		fields := strings.Fields(line)
 		if len(fields) == 0 || fields[0] != "module" {

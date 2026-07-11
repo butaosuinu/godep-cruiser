@@ -146,6 +146,11 @@ func TestNewResolverFromGoMod(t *testing.T) {
 			wantPath: "example.com/acme/app",
 		},
 		{
+			name:     "unspaced line comment",
+			contents: "module example.com/acme/app//root module\n",
+			wantPath: "example.com/acme/app",
+		},
+		{
 			name:     "utf8 byte order mark",
 			contents: "\ufeffmodule example.com/acme/app\n",
 			wantPath: "example.com/acme/app",

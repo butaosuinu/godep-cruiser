@@ -29,14 +29,18 @@ func Scan(root string, resolver Resolver) ([]File, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("scan root %q is not a directory", root)
 	}
+	walkRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve scan root %q: %w", root, err)
+	}
 
 	files := make([]File, 0)
-	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(walkRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if path != root && shouldSkipDirectory(entry.Name()) {
+			if path != walkRoot && shouldSkipDirectory(entry.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -45,7 +49,7 @@ func Scan(root string, resolver Resolver) ([]File, error) {
 			return nil
 		}
 
-		parsedFile, parseErr := parseFile(root, path, resolver)
+		parsedFile, parseErr := parseFile(walkRoot, path, resolver)
 		if parseErr != nil {
 			return parseErr
 		}

@@ -188,6 +188,27 @@ func TestScanHonorsExplicitRootBeforeSkipRules(t *testing.T) {
 	}
 }
 
+func TestScanFollowsExplicitSymlinkRoot(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	target := filepath.Join(workspace, "target")
+	writeTestFile(t, filepath.Join(target, "source.go"), "package source\n")
+
+	root := filepath.Join(workspace, "root")
+	if err := os.Symlink("target", root); err != nil {
+		t.Skipf("create directory symlink: %v", err)
+	}
+
+	files, err := Scan(root, mustResolver(t, "example.com/fixture"))
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "source.go" {
+		t.Errorf("Scan() files = %#v, want source.go", files)
+	}
+}
+
 func TestScanFailsWhenNoGoFilesAreParsed(t *testing.T) {
 	t.Parallel()
 
