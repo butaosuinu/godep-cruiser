@@ -60,8 +60,9 @@ non-goal」に分類する。
 
 | 属性 | 分類 | 備考 |
 |---|---|---|
-| name / comment / severity (error, warn, info, ignore) | 移植 | |
-| scope (module / folder) | 一部移植 | v0 は module のみ。folder は将来 |
+| name / comment | 移植 | forbidden / allowed の各ルールに必須の name と任意の comment を置く |
+| severity (error, warn, info, ignore) | 移植 | forbidden はルール単位、allowed の未一致違反はトップレベルの allowedSeverity を使う |
+| scope (module / folder) | 一部移植 | v0 は module 固定を暗黙適用し、scope フィールドと folder scope は将来追加する |
 
 ### from 側
 
@@ -90,6 +91,35 @@ non-goal」に分類する。
 cruise オプション(doNotFollow / includeOnly / exclude / focus 等)は v0 では
 scan root 指定と skip 規則(`testdata/`、`_`・`.` 接頭ディレクトリ、`vendor/`)
 に絞る。
+
+### 設定形式と loader
+
+v0.1 の設定形式は JSON のみとし、YAML は受理しない。
+標準ライブラリの `encoding/json` だけで loader を実装でき、ランタイム依存を追加せずに未知フィールドと入力位置を検証できるためである。
+公開する JSON Schema は [`schema/godep-cruiser.schema.json`](schema/godep-cruiser.schema.json) とし、Go の `regexp` 構文の検証と capture の相互参照は loader が担う。
+
+トップレベルには `forbidden`、`allowed`、`allowedSeverity` だけを置ける。
+`allowed` を省略すると allowed 検査を無効にし、空配列を明示するとすべての依存を拒否する fail-closed 検査になる。
+各ルールは空でない `name` と `from` と `to` を必須とし、`{}` のような空ルールや metadata だけのルールを拒否する。
+同じ `forbidden` または `allowed` 配列内で rule name が重複する設定も拒否する。
+一方、`from: {}` と `to: {}` を明示したルールは全対象に一致する catch-all として受理する。
+forbidden ルールの `severity` とトップレベルの `allowedSeverity` は、省略時に `warn` とする。
+allowed ルールに個別の `severity` は置けないため、どの allowed ルールにも一致しなかった依存には `allowedSeverity` を使う。
+
+`path`、`pathNot`、`packageName` は Go の正規表現を文字列配列で指定する。
+同じフィールド内の配列要素は OR、異なるフィールド間は AND として評価する。
+正規表現フィールドに単一文字列、`null`、空配列を指定した設定は受理しない。
+`dependencyTypes` と `dependencyTypesNot` も配列とし、値を `stdlib`、`local`、`module`、`unresolved` に限定する。
+
+`to.path` と `to.pathNot` では、`from.path` の capture group を `$1`、`$2` のように参照できる。
+複数の `from.path` が一致した場合は、宣言順で最初に一致した正規表現の capture を使う。
+参照する group はすべての `from.path` 候補に存在しなければならず、loader は存在しない参照を設定エラーにする。
+展開する capture 値は正規表現リテラルとして escape し、path に含まれる記号が `to` 側の正規表現構文へ変わることを防ぐ。
+リテラルの `$1` は `\$1` と書き、文字クラス内の capture 参照、`$0`、`${1}`、名前付き参照は v0.1 では受理しない。
+
+loader は JSON の構文エラーをファイル名、行、列つきで返す。
+型違い、重複フィールド、未知フィールド、不正な正規表現、不正な enum、不正な capture 参照には JSON path も付ける。
+`required`、`scope`、`reachable`、`couldNotResolve` などの v0.1 対象外フィールドも、互換性のために読み捨てず未知フィールドとして拒否する。
 
 ## コア設計判断
 
