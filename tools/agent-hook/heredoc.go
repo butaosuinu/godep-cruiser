@@ -5,23 +5,29 @@ import (
 	"strings"
 )
 
-const hereDocPlaceholder = "__AGENT_HOOK_HEREDOC__"
+const hereDocPlaceholder = "__AGENT_HOOK_HEREDOC_"
 
 type hereDocSpec struct {
-	delimiter string
-	quoted    bool
-	stripTabs bool
+	placeholder string
+	delimiter   string
+	quoted      bool
+	stripTabs   bool
 }
 
-// stripHereDocBodies removes here-document bodies from shell source so they
-// are not mistaken for commands. Command substitutions from expandable bodies
-// are returned separately because the invoking shell executes those before it
-// starts the redirected command.
+// stripHereDocBodies removes here-document bodies and shell comments from
+// shell source so they are not mistaken for commands. Command substitutions
+// from expandable bodies are returned separately because the invoking shell
+// executes those before it starts the redirected command.
 func stripHereDocBodies(command string) (code string, executableScripts []string, err error) {
+	return stripHereDocBodiesAndCapture(command, nil)
+}
+
+func stripHereDocBodiesAndCapture(command string, capturedBodies map[string]string) (code string, executableScripts []string, err error) {
 	var normalized strings.Builder
 	var pending []hereDocSpec
 	quote := byte(0)
 	inWord := false
+	nextHereDocID := 0
 
 	for i := 0; i < len(command); {
 		ch := command[i]
@@ -137,12 +143,10 @@ func stripHereDocBodies(command string) (code string, executableScripts []string
 			if !inWord {
 				end := strings.IndexByte(command[i:], '\n')
 				if end < 0 {
-					normalized.WriteString(command[i:])
 					i = len(command)
 					continue
 				}
 				end += i
-				normalized.WriteString(command[i:end])
 				i = end
 				continue
 			}
@@ -171,11 +175,14 @@ func stripHereDocBodies(command string) (code string, executableScripts []string
 				if delimiterErr != nil {
 					return "", nil, delimiterErr
 				}
-				normalized.WriteString(hereDocPlaceholder)
+				placeholder := fmt.Sprintf("%s%d__", hereDocPlaceholder, nextHereDocID)
+				nextHereDocID++
+				normalized.WriteString(placeholder)
 				pending = append(pending, hereDocSpec{
-					delimiter: delimiter,
-					quoted:    quotedDelimiter,
-					stripTabs: stripTabs,
+					placeholder: placeholder,
+					delimiter:   delimiter,
+					quoted:      quotedDelimiter,
+					stripTabs:   stripTabs,
 				})
 				i = end
 				inWord = true
@@ -190,7 +197,7 @@ func stripHereDocBodies(command string) (code string, executableScripts []string
 			if len(pending) != 0 {
 				var scripts []string
 				var consumeErr error
-				i, scripts, consumeErr = consumeHereDocs(command, i, pending)
+				i, scripts, consumeErr = consumeHereDocs(command, i, pending, capturedBodies)
 				if consumeErr != nil {
 					return "", nil, consumeErr
 				}
@@ -323,7 +330,7 @@ func readHereDocDelimiter(command string, start int) (delimiter string, quoted b
 	return value.String(), quoted, len(command), nil
 }
 
-func consumeHereDocs(command string, start int, specs []hereDocSpec) (end int, scripts []string, err error) {
+func consumeHereDocs(command string, start int, specs []hereDocSpec, capturedBodies map[string]string) (end int, scripts []string, err error) {
 	position := start
 	for _, spec := range specs {
 		var body strings.Builder
@@ -337,11 +344,9 @@ func consumeHereDocs(command string, start int, specs []hereDocSpec) (end int, s
 				break
 			}
 
-			if !spec.quoted {
-				body.WriteString(line)
-				if hasNewline {
-					body.WriteByte('\n')
-				}
+			body.WriteString(line)
+			if hasNewline {
+				body.WriteByte('\n')
 			}
 			position = nextPosition
 			if !hasNewline {
@@ -352,6 +357,13 @@ func consumeHereDocs(command string, start int, specs []hereDocSpec) (end int, s
 		if !found {
 			return 0, nil, fmt.Errorf("unterminated here-document %q", spec.delimiter)
 		}
+		if capturedBodies != nil {
+			capturedBody := body.String()
+			if !spec.quoted {
+				capturedBody = unescapeHereDocBody(capturedBody)
+			}
+			capturedBodies[spec.placeholder] = capturedBody
+		}
 		if !spec.quoted {
 			bodyScripts, bodyErr := hereDocExecutableScripts(body.String())
 			if bodyErr != nil {
@@ -361,6 +373,17 @@ func consumeHereDocs(command string, start int, specs []hereDocSpec) (end int, s
 		}
 	}
 	return position, scripts, nil
+}
+
+func unescapeHereDocBody(body string) string {
+	var unescaped strings.Builder
+	for i := 0; i < len(body); i++ {
+		if body[i] == '\\' && i+1 < len(body) && strings.ContainsRune("\\$`", rune(body[i+1])) {
+			i++
+		}
+		unescaped.WriteByte(body[i])
+	}
+	return unescaped.String()
 }
 
 func readHereDocLogicalLine(command string, start int, expandable, stripTabs bool) (line string, next int, hasNewline bool) {
@@ -425,6 +448,10 @@ func hereDocExecutableScripts(body string) ([]string, error) {
 			scripts = append(scripts, body[i+1:end])
 			i = end
 		case '$':
+			if i+2 < len(body) && body[i+1] == '(' && body[i+2] == '(' {
+				i += 2
+				continue
+			}
 			if i+1 >= len(body) || body[i+1] != '(' {
 				continue
 			}

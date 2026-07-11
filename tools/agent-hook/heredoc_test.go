@@ -156,7 +156,7 @@ func TestStripHereDocBodiesOutput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantCode := "cat 3<<" + hereDocPlaceholder + " <<" + hereDocPlaceholder + "\ngit status\n"
+	wantCode := "cat 3<<" + hereDocPlaceholder + "0__ <<" + hereDocPlaceholder + "1__\ngit status\n"
 	if code != wantCode {
 		t.Errorf("code = %q, want %q", code, wantCode)
 	}
@@ -191,8 +191,9 @@ func TestStripHereDocBodiesIgnoresCommentedOperator(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code != command {
-		t.Errorf("code = %q, want original command", code)
+	wantCode := "echo ok \ngit status\n"
+	if code != wantCode {
+		t.Errorf("code = %q, want %q", code, wantCode)
 	}
 	if len(scripts) != 0 {
 		t.Errorf("scripts = %q, want none", scripts)

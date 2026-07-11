@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -19,6 +21,8 @@ const (
 	exitOK                 = 0
 	exitBlock              = 2
 	dynamicWordPlaceholder = "__AGENT_HOOK_DYNAMIC__"
+	dynamicGitAlias        = "__AGENT_HOOK_DYNAMIC_GIT_ALIAS__"
+	dynamicGitAliasName    = "__AGENT_HOOK_ANY_GIT_ALIAS__"
 )
 
 type hookInput struct {
@@ -32,6 +36,36 @@ type shellToken struct {
 	kind     tokenKind
 	dynamic  bool
 	maySplit bool
+}
+
+type shellRedirect struct {
+	operator string
+	target   shellToken
+}
+
+type shellInputKind uint8
+
+const (
+	shellInputNone shellInputKind = iota
+	shellInputScript
+	shellInputUnknown
+)
+
+type shellInputSource struct {
+	kind   shellInputKind
+	script string
+}
+
+type shellGroup struct {
+	start     int
+	end       int
+	redirects []shellRedirect
+}
+
+type shellTokenRange struct {
+	start       int
+	end         int
+	beforeGroup int
 }
 
 type tokenKind uint8
@@ -114,6 +148,11 @@ func decodeHookInput(r io.Reader) (hookInput, string, bool, error) {
 	if !ok {
 		raw, ok = fields["cmd"]
 	}
+	if !ok && strings.EqualFold(filepath.Base(input.ToolName), "monitor") {
+		if _, hasWebSocket := fields["ws"]; hasWebSocket {
+			return input, "", false, nil
+		}
+	}
 	if !ok {
 		return hookInput{}, "", false, errors.New("tool_input has no command or cmd field")
 	}
@@ -127,7 +166,7 @@ func decodeHookInput(r io.Reader) (hookInput, string, bool, error) {
 
 func isShellTool(name string) bool {
 	switch strings.ToLower(filepath.Base(name)) {
-	case "bash", "shell", "exec_command", "shell_command", "terminal":
+	case "bash", "monitor", "shell", "exec_command", "shell_command", "terminal":
 		return true
 	default:
 		return false
@@ -227,7 +266,12 @@ func isProjectRoot(dir string) bool {
 }
 
 func containsGitPush(command string) (bool, error) {
-	command, hereDocScripts, err := stripHereDocBodies(command)
+	return containsGitPushWithContext(command, nil, nil)
+}
+
+func containsGitPushWithContext(command string, inheritedInputs map[int]shellInputSource, inheritedGitAliases map[string]string) (bool, error) {
+	hereDocBodies := make(map[string]string)
+	command, hereDocScripts, err := stripHereDocBodiesAndCapture(command, hereDocBodies)
 	if err != nil {
 		return false, err
 	}
@@ -238,7 +282,7 @@ func containsGitPush(command string) (bool, error) {
 	}
 	nested = append(nested, hereDocScripts...)
 	for _, script := range nested {
-		push, nestedErr := containsGitPush(script)
+		push, nestedErr := containsGitPushWithContext(script, inheritedInputs, inheritedGitAliases)
 		if nestedErr != nil {
 			return false, nestedErr
 		}
@@ -252,17 +296,146 @@ func containsGitPush(command string) (bool, error) {
 		return false, err
 	}
 
+	groups := shellGroups(tokens)
+	pipeRanges := shellPipelineRanges(tokens, groups)
 	start := 0
 	for i, token := range tokens {
 		if token.kind != controlToken {
 			continue
 		}
-		if segmentContainsGitPush(tokens[start:i]) {
-			return true, nil
+		if i > start {
+			inputs := shellSegmentInputs(inheritedInputs, groups, pipeRanges, start, i, hereDocBodies)
+			if segmentContainsGitPush(tokens[start:i], hereDocBodies, inputs, inheritedGitAliases) {
+				return true, nil
+			}
 		}
 		start = i + 1
 	}
-	return segmentContainsGitPush(tokens[start:]), nil
+	inputs := shellSegmentInputs(inheritedInputs, groups, pipeRanges, start, len(tokens), hereDocBodies)
+	return segmentContainsGitPush(tokens[start:], hereDocBodies, inputs, inheritedGitAliases), nil
+}
+
+func shellGroups(tokens []shellToken) []shellGroup {
+	type groupStart struct {
+		index int
+		kind  string
+	}
+	var stack []groupStart
+	var groups []shellGroup
+	for i, token := range tokens {
+		kind := ""
+		opening := false
+		switch {
+		case token.kind == controlToken && token.text == "(":
+			kind, opening = "(", true
+		case token.kind == wordToken && token.text == "{":
+			kind, opening = "{", true
+		case token.kind == wordToken && token.text == "if":
+			kind, opening = "if", true
+		case token.kind == wordToken && (token.text == "for" || token.text == "select" || token.text == "until" || token.text == "while"):
+			kind, opening = "loop", true
+		case token.kind == wordToken && token.text == "case":
+			kind, opening = "case", true
+		case token.kind == controlToken && token.text == ")":
+			kind = "("
+		case token.kind == wordToken && token.text == "}":
+			kind = "{"
+		case token.kind == wordToken && token.text == "fi":
+			kind = "if"
+		case token.kind == wordToken && token.text == "done":
+			kind = "loop"
+		case token.kind == wordToken && token.text == "esac":
+			kind = "case"
+		default:
+			continue
+		}
+		if opening {
+			stack = append(stack, groupStart{index: i, kind: kind})
+			continue
+		}
+		if len(stack) == 0 || stack[len(stack)-1].kind != kind {
+			continue
+		}
+		start := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		redirectEnd := i + 1
+		for redirectEnd < len(tokens) && tokens[redirectEnd].kind != controlToken {
+			redirectEnd++
+		}
+		groups = append(groups, shellGroup{
+			start:     start.index,
+			end:       i,
+			redirects: shellRedirections(tokens[i+1 : redirectEnd]),
+		})
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].start == groups[j].start {
+			return groups[i].end > groups[j].end
+		}
+		return groups[i].start < groups[j].start
+	})
+	return groups
+}
+
+func shellPipelineRanges(tokens []shellToken, groups []shellGroup) []shellTokenRange {
+	groupByStart := make(map[int]shellGroup, len(groups))
+	for _, group := range groups {
+		groupByStart[group.start] = group
+	}
+	var ranges []shellTokenRange
+	for i, token := range tokens {
+		if token.kind != controlToken || token.text != "|" && token.text != "|&" {
+			continue
+		}
+		start := i + 1
+		for start < len(tokens) && tokens[start].kind == controlToken && tokens[start].text == "\n" {
+			start++
+		}
+		if start >= len(tokens) {
+			continue
+		}
+		if group, ok := groupByStart[start]; ok {
+			ranges = append(ranges, shellTokenRange{start: start + 1, end: group.end, beforeGroup: group.start})
+			continue
+		}
+		end := start
+		for end < len(tokens) && tokens[end].kind != controlToken {
+			end++
+		}
+		ranges = append(ranges, shellTokenRange{start: start, end: end, beforeGroup: -1})
+	}
+	return ranges
+}
+
+func shellSegmentInputs(inherited map[int]shellInputSource, groups []shellGroup, pipeRanges []shellTokenRange, start, end int, hereDocBodies map[string]string) map[int]shellInputSource {
+	inputs := cloneShellInputSources(inherited)
+	for _, group := range groups {
+		if rangesOverlap(start, end, group.start+1, group.end) {
+			for _, pipeRange := range pipeRanges {
+				if pipeRange.beforeGroup == group.start && rangesOverlap(start, end, pipeRange.start, pipeRange.end) {
+					inputs[0] = shellInputSource{kind: shellInputUnknown}
+				}
+			}
+			inputs = resolveShellInputSources(inputs, group.redirects, hereDocBodies)
+		}
+	}
+	for _, pipeRange := range pipeRanges {
+		if pipeRange.beforeGroup < 0 && rangesOverlap(start, end, pipeRange.start, pipeRange.end) {
+			inputs[0] = shellInputSource{kind: shellInputUnknown}
+			break
+		}
+	}
+	return inputs
+}
+
+func rangesOverlap(leftStart, leftEnd, rightStart, rightEnd int) bool {
+	return leftStart < rightEnd && rightStart < leftEnd
+}
+
+func cloneShellInputSources(sources map[int]shellInputSource) map[int]shellInputSource {
+	cloned := make(map[int]shellInputSource, len(sources))
+	maps.Copy(cloned, sources)
+	return cloned
 }
 
 func commandSubstitutions(command string) ([]string, error) {
@@ -358,7 +531,9 @@ func closingBacktick(command string, start int) (int, error) {
 
 func closingCommandParenthesis(command string, start int) (int, error) {
 	depth := 1
+	wordParentheses := []bool{true}
 	quote := byte(0)
+	inWord := false
 	for i := start; i < len(command); i++ {
 		ch := command[i]
 		if quote == 0 && ch == '$' && i+1 < len(command) && command[i+1] == '\'' {
@@ -367,6 +542,7 @@ func closingCommandParenthesis(command string, start int) (int, error) {
 				return 0, ansiErr
 			}
 			i = end
+			inWord = true
 			continue
 		}
 		if quote == '\'' {
@@ -376,11 +552,15 @@ func closingCommandParenthesis(command string, start int) (int, error) {
 			continue
 		}
 		if ch == '\\' {
+			if i+1 < len(command) && command[i+1] != '\n' {
+				inWord = true
+			}
 			i++
 			continue
 		}
 		if ch == '\'' && quote == 0 {
 			quote = '\''
+			inWord = true
 			continue
 		}
 		if ch == '"' {
@@ -389,29 +569,62 @@ func closingCommandParenthesis(command string, start int) (int, error) {
 				quote = 0
 			case 0:
 				quote = '"'
+				inWord = true
 			}
 			continue
 		}
 		if quote != 0 {
 			continue
 		}
+		if ch == '#' && !inWord {
+			newline := strings.IndexByte(command[i:], '\n')
+			if newline < 0 {
+				return 0, errors.New("unterminated command substitution")
+			}
+			i += newline
+			inWord = false
+			continue
+		}
+		if ch == '`' {
+			end, err := closingBacktick(command, i+1)
+			if err != nil {
+				return 0, err
+			}
+			i = end
+			inWord = true
+			continue
+		}
 		switch ch {
 		case '(':
 			depth++
+			wordParentheses = append(wordParentheses, i > 0 && (command[i-1] == '$' || command[i-1] == '<' || command[i-1] == '>'))
+			inWord = false
 		case ')':
 			depth--
+			closedWord := wordParentheses[len(wordParentheses)-1]
+			wordParentheses = wordParentheses[:len(wordParentheses)-1]
 			if depth == 0 {
 				return i, nil
 			}
+			inWord = closedWord
+		case ' ', '\t', '\r', '\n', ';', '&', '|', '<', '>':
+			inWord = false
+		default:
+			inWord = true
 		}
 	}
 	return 0, errors.New("unterminated command substitution")
 }
 
-func segmentContainsGitPush(tokens []shellToken) bool {
+func segmentContainsGitPush(tokens []shellToken, hereDocBodies map[string]string, inheritedInputs map[int]shellInputSource, inheritedGitAliases map[string]string) bool {
 	canUseReservedTime := reservedTimeAllowed(tokens)
+	canUseShellBuiltin := true
+	gitEnvironment := make(map[string]shellToken)
+	redirects := shellRedirections(tokens)
+	inputSources := resolveShellInputSources(inheritedInputs, redirects, hereDocBodies)
 	tokens = shellCommandArguments(tokens)
-	i := skipCommandPrefixes(tokens, 0)
+	i := skipCommandPrefixes(tokens, 0, true)
+	recordGitEnvironmentAssignments(gitEnvironment, tokens[:i])
 	if i >= len(tokens) || tokens[i].kind != wordToken {
 		return false
 	}
@@ -421,25 +634,34 @@ func segmentContainsGitPush(tokens []shellToken) bool {
 			return true
 		}
 		executable := filepath.Base(tokens[i].text)
+		allowAssignmentPrefixes := false
 		switch executable {
 		case "command":
 			canUseReservedTime = false
-			i++
-			for i < len(tokens) && tokens[i].kind == wordToken && strings.HasPrefix(tokens[i].text, "-") {
-				if tokens[i].dynamic {
-					return true
-				}
-				if tokens[i].text == "-v" || tokens[i].text == "-V" {
-					return false
-				}
-				i++
+			var lookup, unsafe, valid bool
+			i, lookup, unsafe, valid = commandCommandIndex(tokens, i+1)
+			if unsafe {
+				return true
 			}
+			if lookup || !valid {
+				return false
+			}
+			// macOS provides an external command utility that can dispatch shell
+			// builtins. Treat it like the builtin here so wrapped trap and exec
+			// invocations still fail closed on every supported platform.
+			canUseShellBuiltin = true
 		case "env":
 			canUseReservedTime = false
+			canUseShellBuiltin = false
 			i++
 			for i < len(tokens) && tokens[i].kind == wordToken {
 				arg := tokens[i].text
+				if !tokens[i].dynamic && envClearsEnvironment(arg) {
+					clear(gitEnvironment)
+					inheritedGitAliases = nil
+				}
 				if isAssignment(arg) {
+					recordGitEnvironmentAssignment(gitEnvironment, tokens[i])
 					i++
 					continue
 				}
@@ -454,7 +676,7 @@ func segmentContainsGitPush(tokens []shellToken) bool {
 					return true
 				}
 				if splitValue, split, consumeNext := shortEnvOption(arg); split {
-					return splitStringContainsGitPush(tokens[i+1:], splitValue, consumeNext)
+					return splitStringContainsGitPush(tokens[i+1:], splitValue, consumeNext, redirects, hereDocBodies, inheritedInputs, inheritedGitAliases)
 				} else if consumeNext {
 					var unsafe bool
 					i, unsafe = optionValueEnd(tokens, i+1)
@@ -464,10 +686,10 @@ func segmentContainsGitPush(tokens []shellToken) bool {
 					continue
 				}
 				if arg == "--split-string" {
-					return splitStringContainsGitPush(tokens[i+1:], "", true)
+					return splitStringContainsGitPush(tokens[i+1:], "", true, redirects, hereDocBodies, inheritedInputs, inheritedGitAliases)
 				}
 				if value, ok := strings.CutPrefix(arg, "--split-string="); ok {
-					return splitStringContainsGitPush(tokens[i+1:], value, false)
+					return splitStringContainsGitPush(tokens[i+1:], value, false, redirects, hereDocBodies, inheritedInputs, inheritedGitAliases)
 				}
 				if arg == "--unset" || arg == "--chdir" || arg == "--argv0" {
 					var unsafe bool
@@ -483,26 +705,187 @@ func segmentContainsGitPush(tokens []shellToken) bool {
 				}
 				break
 			}
+		case "exec":
+			if !canUseShellBuiltin || tokens[i].text != "exec" {
+				return false
+			}
+			canUseReservedTime = false
+			canUseShellBuiltin = false
+			var unsafe, valid bool
+			i, unsafe, valid = execCommandIndex(tokens, i+1)
+			if unsafe {
+				return true
+			}
+			if !valid {
+				return false
+			}
 		case "sh", "bash", "dash", "ksh", "zsh":
-			return shellCommandContainsGitPush(tokens[i+1:])
+			return shellCommandContainsGitPush(tokens[i+1:], inputSources, inheritedGitAliases)
 		case "eval":
-			return evaluatedCommandContainsGitPush(tokens[i+1:])
+			if !canUseShellBuiltin || tokens[i].text != "eval" {
+				return false
+			}
+			return evaluatedCommandContainsGitPush(tokens[i+1:], inputSources, inheritedGitAliases)
+		case "builtin":
+			if !canUseShellBuiltin || tokens[i].text != "builtin" {
+				return false
+			}
+			canUseReservedTime = false
+			i++
+			if i < len(tokens) && tokens[i].kind == wordToken && tokens[i].text == "--" && !tokens[i].dynamic {
+				i++
+			}
+			if i >= len(tokens) || tokens[i].kind != wordToken {
+				return false
+			}
+			if tokens[i].dynamic {
+				return true
+			}
+			switch tokens[i].text {
+			case "builtin", "command", "eval", "exec", "trap":
+				// Continue through the wrapper loop for builtins whose arguments
+				// can execute a command string or replace the current process.
+			default:
+				return false
+			}
+		case "trap":
+			if !canUseShellBuiltin || tokens[i].text != "trap" {
+				return false
+			}
+			return trapContainsGitPush(tokens[i+1:], inputSources, inheritedGitAliases)
 		case "time":
 			reserved := canUseReservedTime && tokens[i].text == "time"
 			i = skipTimeOptions(tokens, i+1, reserved)
 			canUseReservedTime = reserved
+			canUseShellBuiltin = reserved
+			allowAssignmentPrefixes = reserved
 		default:
 			if !isGitExecutable(tokens[i].text) {
 				return false
 			}
-			return gitArgsContainPush(tokens[i+1:])
+			aliases := maps.Clone(inheritedGitAliases)
+			if aliases == nil {
+				aliases = make(map[string]string)
+			}
+			maps.Copy(aliases, gitAliasesFromEnvironment(gitEnvironment))
+			return gitArgsContainPush(tokens[i+1:], aliases, inputSources)
 		}
 
-		i = skipCommandPrefixes(tokens, i)
+		start := i
+		i = skipCommandPrefixes(tokens, i, allowAssignmentPrefixes)
+		if allowAssignmentPrefixes {
+			recordGitEnvironmentAssignments(gitEnvironment, tokens[start:i])
+		}
 		if i >= len(tokens) || tokens[i].kind != wordToken {
 			return false
 		}
 	}
+}
+
+func trapContainsGitPush(tokens []shellToken, inputSources map[int]shellInputSource, gitAliases map[string]string) bool {
+	i, ok := nextWordToken(tokens, 0)
+	if !ok {
+		return false
+	}
+	optionsEnded := !tokens[i].dynamic && tokens[i].text == "--"
+	if optionsEnded {
+		i, ok = nextWordToken(tokens, i+1)
+		if !ok {
+			return false
+		}
+	}
+	if _, hasSignal := nextWordToken(tokens, i+1); !hasSignal {
+		return false
+	}
+	action := tokens[i]
+	if action.dynamic {
+		return true
+	}
+	if action.text == "" || action.text == "-" {
+		return false
+	}
+	if !optionsEnded && strings.HasPrefix(action.text, "-") {
+		return false
+	}
+	push, err := containsGitPushWithContext(action.text, inputSources, gitAliases)
+	return err != nil || push
+}
+
+func commandCommandIndex(tokens []shellToken, start int) (index int, lookup, unsafe, valid bool) {
+	for i := start; i < len(tokens) && tokens[i].kind == wordToken; i++ {
+		arg := tokens[i]
+		if arg.dynamic {
+			return i, false, true, true
+		}
+		if arg.text == "--" {
+			return i + 1, false, false, true
+		}
+		if arg.text == "-" || !strings.HasPrefix(arg.text, "-") {
+			return i, false, false, true
+		}
+		if strings.HasPrefix(arg.text, "--") {
+			return i, false, false, false
+		}
+		for _, option := range arg.text[1:] {
+			switch option {
+			case 'p':
+			case 'v', 'V':
+				lookup = true
+			default:
+				return i, false, false, false
+			}
+		}
+		if lookup {
+			return i + 1, true, false, true
+		}
+	}
+	return len(tokens), false, false, true
+}
+
+func execCommandIndex(tokens []shellToken, start int) (index int, unsafe, valid bool) {
+	i := start
+	for i < len(tokens) && tokens[i].kind == wordToken {
+		arg := tokens[i]
+		if arg.dynamic {
+			return i, true, true
+		}
+		if arg.text == "--" {
+			return i + 1, false, true
+		}
+		if arg.text == "-" || !strings.HasPrefix(arg.text, "-") {
+			return i, false, true
+		}
+		if strings.HasPrefix(arg.text, "--") {
+			return i, false, false
+		}
+
+		options := arg.text[1:]
+		for optionIndex, option := range options {
+			switch option {
+			case 'c', 'l':
+			case 'a':
+				if optionIndex+1 < len(options) {
+					i++
+				} else {
+					var valueUnsafe bool
+					i, valueUnsafe = optionValueEnd(tokens, i+1)
+					if valueUnsafe {
+						return i, true, true
+					}
+				}
+			default:
+				return i, false, false
+			}
+			if option == 'a' {
+				break
+			}
+		}
+		if strings.ContainsRune(options, 'a') {
+			continue
+		}
+		i++
+	}
+	return i, false, true
 }
 
 func optionValueEnd(tokens []shellToken, start int) (end int, unsafe bool) {
@@ -562,7 +945,25 @@ func envOptionHasAttachedValue(arg string) bool {
 	return len(arg) > 2 && (strings.HasPrefix(arg, "-u") || strings.HasPrefix(arg, "-C") || strings.HasPrefix(arg, "-P"))
 }
 
-func splitStringContainsGitPush(tokens []shellToken, prefix string, consumeValue bool) bool {
+func envClearsEnvironment(arg string) bool {
+	if arg == "--ignore-environment" {
+		return true
+	}
+	if len(arg) < 2 || arg[0] != '-' || strings.HasPrefix(arg, "--") {
+		return false
+	}
+	for _, option := range arg[1:] {
+		if option == 'i' {
+			return true
+		}
+		if option == 'S' || option == 'u' || option == 'C' || option == 'P' {
+			return false
+		}
+	}
+	return false
+}
+
+func splitStringContainsGitPush(tokens []shellToken, prefix string, consumeValue bool, redirects []shellRedirect, hereDocBodies map[string]string, inheritedInputs map[int]shellInputSource, inheritedGitAliases map[string]string) bool {
 	value := prefix
 	remaining := tokens
 	if consumeValue {
@@ -589,10 +990,16 @@ func splitStringContainsGitPush(tokens []shellToken, prefix string, consumeValue
 		combined = append(combined, shellToken{text: word, kind: wordToken})
 	}
 	combined = append(combined, remaining...)
+	for _, redirect := range redirects {
+		combined = append(combined,
+			shellToken{text: redirect.operator, kind: redirectToken},
+			redirect.target,
+		)
+	}
 	if len(combined) == 0 {
 		return false
 	}
-	return segmentContainsGitPush(combined)
+	return segmentContainsGitPush(combined, hereDocBodies, inheritedInputs, inheritedGitAliases)
 }
 
 func splitEnvString(value string) ([]string, error) {
@@ -740,14 +1147,53 @@ func shellCommandArguments(tokens []shellToken) []shellToken {
 	return arguments
 }
 
-func shellCommandContainsGitPush(tokens []shellToken) bool {
+func shellRedirections(tokens []shellToken) []shellRedirect {
+	var redirects []shellRedirect
+	for i := 0; i < len(tokens); i++ {
+		if tokens[i].kind != redirectToken || i+1 >= len(tokens) || tokens[i+1].kind != wordToken {
+			continue
+		}
+		redirects = append(redirects, shellRedirect{operator: tokens[i].text, target: tokens[i+1]})
+		i++
+	}
+	return redirects
+}
+
+func shellCommandContainsGitPush(tokens []shellToken, inputSources map[int]shellInputSource, gitAliases map[string]string) bool {
+	stdinMode := false
+	commandStringMode := false
+	noExec := false
+	interactive := false
+	startupContainsPush := false
+	inputContainsPush := func(source shellInputSource) bool {
+		return !noExec && (interactive && startupContainsPush || shellInputContainsGitPush(source))
+	}
+	startupPush := func() bool {
+		return !noExec && interactive && startupContainsPush
+	}
+	commandStringContainsPush := func(command shellToken) bool {
+		if noExec {
+			return false
+		}
+		if interactive && startupContainsPush || command.dynamic {
+			return true
+		}
+		push, err := containsGitPushWithContext(command.text, inputSources, gitAliases)
+		return err != nil || push
+	}
 	for i := 0; i < len(tokens); {
 		if tokens[i].kind != wordToken {
 			i++
 			continue
 		}
 		arg := tokens[i].text
+		if stdinMode && !commandStringMode && (tokens[i].dynamic || len(arg) < 2 || (arg[0] != '-' && arg[0] != '+')) {
+			return inputContainsPush(inputSources[0])
+		}
 		if tokens[i].dynamic {
+			if commandStringMode {
+				return commandStringContainsPush(tokens[i])
+			}
 			if shellOptionHasAttachedValue(arg) && !tokens[i].maySplit {
 				i++
 				continue
@@ -755,9 +1201,48 @@ func shellCommandContainsGitPush(tokens []shellToken) bool {
 			return true
 		}
 		if arg == "--" {
-			return false
+			i++
+			if commandStringMode {
+				nextIndex, ok := nextWordToken(tokens, i)
+				if !ok {
+					return false
+				}
+				i = nextIndex
+				return commandStringContainsPush(tokens[i])
+			}
+			if stdinMode || i >= len(tokens) {
+				return inputContainsPush(inputSources[0])
+			}
+			if tokens[i].dynamic {
+				return true
+			}
+			if strings.Contains(tokens[i].text, dynamicWordPlaceholder) {
+				return !noExec
+			}
+			if fd, ok := shellInputFileDescriptor(tokens[i].text); ok {
+				return inputContainsPush(inputSources[fd])
+			}
+			return startupPush()
 		}
 		if strings.HasPrefix(arg, "--") {
+			if arg == "--help" || arg == "--version" {
+				return false
+			}
+			if arg == "--noexec" {
+				noExec = true
+			}
+			if arg == "--interactive" {
+				interactive = true
+			}
+			for _, prefix := range []string{"--rcfile=", "--init-file="} {
+				if value, attached := strings.CutPrefix(arg, prefix); attached {
+					if strings.Contains(value, dynamicWordPlaceholder) {
+						startupContainsPush = true
+					} else if fd, inputFile := shellInputFileDescriptor(value); inputFile {
+						startupContainsPush = startupContainsPush || shellInputContainsGitPush(inputSources[fd])
+					}
+				}
+			}
 			i++
 			if arg == "--rcfile" || arg == "--init-file" {
 				var ok bool
@@ -768,15 +1253,47 @@ func shellCommandContainsGitPush(tokens []shellToken) bool {
 				if tokens[i].maySplit {
 					return true
 				}
+				if strings.Contains(tokens[i].text, dynamicWordPlaceholder) {
+					startupContainsPush = true
+				}
+				if fd, inputFile := shellInputFileDescriptor(tokens[i].text); inputFile {
+					startupContainsPush = startupContainsPush || shellInputContainsGitPush(inputSources[fd])
+				}
 				i++
 			}
 			continue
 		}
+		if arg == "-" {
+			if commandStringMode {
+				i++
+				continue
+			}
+			return inputContainsPush(inputSources[0])
+		}
+		if arg == "+" && commandStringMode {
+			i++
+			continue
+		}
 		if len(arg) < 2 || (arg[0] != '-' && arg[0] != '+') {
-			return false
+			if commandStringMode {
+				return commandStringContainsPush(tokens[i])
+			}
+			if strings.Contains(arg, dynamicWordPlaceholder) {
+				return !noExec
+			}
+			if fd, ok := shellInputFileDescriptor(arg); ok {
+				return inputContainsPush(inputSources[fd])
+			}
+			return startupPush()
 		}
 
 		options := arg[1:]
+		if strings.ContainsRune(options, 'n') {
+			noExec = arg[0] == '-'
+		}
+		if strings.ContainsRune(options, 'i') {
+			interactive = arg[0] == '-'
+		}
 		i++
 		for _, option := range options {
 			if option != 'o' && option != 'O' {
@@ -790,23 +1307,138 @@ func shellCommandContainsGitPush(tokens []shellToken) bool {
 			if tokens[i].maySplit {
 				return true
 			}
+			if option == 'o' && tokens[i].text == "noexec" {
+				noExec = arg[0] == '-'
+			}
 			i++
 		}
 		if !strings.ContainsRune(options, 'c') {
+			if arg[0] == '-' && strings.ContainsRune(options, 's') {
+				stdinMode = true
+			}
 			continue
 		}
-		var ok bool
-		i, ok = nextWordToken(tokens, i)
-		if !ok {
-			return false
+		if arg[0] != '-' {
+			continue
 		}
-		if tokens[i].dynamic {
-			return true
-		}
-		push, err := containsGitPush(tokens[i].text)
-		return err != nil || push
+		commandStringMode = true
 	}
-	return false
+	if commandStringMode {
+		return false
+	}
+	return inputContainsPush(inputSources[0])
+}
+
+func resolveShellInputSources(inherited map[int]shellInputSource, redirects []shellRedirect, hereDocBodies map[string]string) map[int]shellInputSource {
+	sources := cloneShellInputSources(inherited)
+	for _, redirect := range redirects {
+		fd, operator, input := shellInputRedirect(redirect.operator)
+		if !input {
+			continue
+		}
+		switch operator {
+		case "<<<":
+			if redirect.target.dynamic {
+				sources[fd] = shellInputSource{kind: shellInputUnknown}
+			} else {
+				sources[fd] = shellInputSource{kind: shellInputScript, script: redirect.target.text}
+			}
+		case "<<":
+			if script, ok := hereDocBodies[redirect.target.text]; ok {
+				sources[fd] = shellInputSource{kind: shellInputScript, script: script}
+			} else {
+				sources[fd] = shellInputSource{kind: shellInputUnknown}
+			}
+		case "<", "<>":
+			if redirect.target.dynamic || strings.Contains(redirect.target.text, dynamicWordPlaceholder) {
+				sources[fd] = shellInputSource{kind: shellInputUnknown}
+				continue
+			}
+			if sourceFD, ok := shellInputFileDescriptor(redirect.target.text); ok {
+				sources[fd] = sources[sourceFD]
+			} else {
+				delete(sources, fd)
+			}
+		case "<&":
+			if redirect.target.dynamic || redirect.target.maySplit || strings.Contains(redirect.target.text, dynamicWordPlaceholder) {
+				sources[fd] = shellInputSource{kind: shellInputUnknown}
+				continue
+			}
+			sourceFD, move, ok := duplicatedFileDescriptor(redirect.target.text)
+			if !ok {
+				delete(sources, fd)
+				continue
+			}
+			sources[fd] = sources[sourceFD]
+			if move {
+				delete(sources, sourceFD)
+			}
+		}
+	}
+	return sources
+}
+
+func shellInputContainsGitPush(source shellInputSource) bool {
+	if source.kind == shellInputUnknown {
+		return true
+	}
+	if source.kind != shellInputScript {
+		return false
+	}
+	push, err := containsGitPush(source.script)
+	return err != nil || push
+}
+
+func shellInputRedirect(operator string) (fd int, redirectOperator string, input bool) {
+	i := 0
+	for i < len(operator) && operator[i] >= '0' && operator[i] <= '9' {
+		i++
+	}
+	fd = 0
+	if i > 0 {
+		parsedFD, err := strconv.Atoi(operator[:i])
+		if err != nil {
+			return 0, "", false
+		}
+		fd = parsedFD
+	}
+	operator = operator[i:]
+	switch operator {
+	case "<", "<<", "<<<", "<>", "<&":
+		return fd, operator, true
+	default:
+		return 0, "", false
+	}
+}
+
+func shellInputFileDescriptor(path string) (int, bool) {
+	if path == "/dev/stdin" {
+		return 0, true
+	}
+	for _, prefix := range []string{"/dev/fd/", "/proc/self/fd/"} {
+		value, ok := strings.CutPrefix(path, prefix)
+		if !ok || value == "" {
+			continue
+		}
+		fd, err := strconv.Atoi(value)
+		return fd, err == nil && fd >= 0
+	}
+	return 0, false
+}
+
+func duplicatedFileDescriptor(value string) (fd int, move, ok bool) {
+	if value == "-" {
+		return 0, false, false
+	}
+	if strings.HasSuffix(value, "-") {
+		move = true
+		value = strings.TrimSuffix(value, "-")
+	}
+	if value == "" {
+		return 0, false, false
+	}
+	fd, err := strconv.Atoi(value)
+	return fd, move, err == nil && fd >= 0
 }
 
 func shellOptionHasAttachedValue(arg string) bool {
@@ -822,7 +1454,7 @@ func nextWordToken(tokens []shellToken, start int) (int, bool) {
 	return 0, false
 }
 
-func evaluatedCommandContainsGitPush(tokens []shellToken) bool {
+func evaluatedCommandContainsGitPush(tokens []shellToken, inputSources map[int]shellInputSource, gitAliases map[string]string) bool {
 	var words []string
 	for _, token := range tokens {
 		if token.kind == wordToken {
@@ -835,11 +1467,17 @@ func evaluatedCommandContainsGitPush(tokens []shellToken) bool {
 	if len(words) == 0 {
 		return false
 	}
-	push, err := containsGitPush(strings.Join(words, " "))
+	if words[0] == "--" {
+		words = words[1:]
+	}
+	if len(words) == 0 {
+		return false
+	}
+	push, err := containsGitPushWithContext(strings.Join(words, " "), inputSources, gitAliases)
 	return err != nil || push
 }
 
-func skipCommandPrefixes(tokens []shellToken, start int) int {
+func skipCommandPrefixes(tokens []shellToken, start int, allowAssignments bool) int {
 	i := start
 	for i < len(tokens) {
 		if tokens[i].kind == redirectToken {
@@ -849,7 +1487,7 @@ func skipCommandPrefixes(tokens []shellToken, start int) int {
 			}
 			continue
 		}
-		if tokens[i].kind == wordToken && isAssignment(tokens[i].text) {
+		if allowAssignments && tokens[i].kind == wordToken && isAssignment(tokens[i].text) {
 			i++
 			continue
 		}
@@ -1011,10 +1649,67 @@ func isShellNameContinue(ch byte) bool {
 	return isShellNameStart(ch) || ch >= '0' && ch <= '9'
 }
 
-func gitArgsContainPush(tokens []shellToken) bool {
+func recordGitEnvironmentAssignments(environment map[string]shellToken, tokens []shellToken) {
+	for _, token := range tokens {
+		recordGitEnvironmentAssignment(environment, token)
+	}
+}
+
+func recordGitEnvironmentAssignment(environment map[string]shellToken, token shellToken) {
+	name, value, ok := strings.Cut(token.text, "=")
+	if !ok || name != "GIT_CONFIG_COUNT" && !strings.HasPrefix(name, "GIT_CONFIG_KEY_") && !strings.HasPrefix(name, "GIT_CONFIG_VALUE_") {
+		return
+	}
+	token.text = value
+	environment[name] = token
+}
+
+func gitAliasesFromEnvironment(environment map[string]shellToken) map[string]string {
+	aliases := make(map[string]string)
+	countToken, ok := environment["GIT_CONFIG_COUNT"]
+	if !ok {
+		return aliases
+	}
+	if countToken.dynamic {
+		aliases[dynamicGitAliasName] = dynamicGitAlias
+		return aliases
+	}
+	count, err := strconv.Atoi(countToken.text)
+	if err != nil || count < 0 || count > 10_000 {
+		return aliases
+	}
+	for i := range count {
+		key, keyOK := environment[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)]
+		value, valueOK := environment[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)]
+		if !keyOK || !valueOK {
+			continue
+		}
+		if key.dynamic {
+			clear(aliases)
+			aliases[dynamicGitAliasName] = dynamicGitAlias
+			continue
+		}
+		name, _, alias := gitAliasDefinition(key.text + "=")
+		if !alias {
+			continue
+		}
+		if value.dynamic {
+			aliases[name] = dynamicGitAlias
+		} else {
+			aliases[name] = value.text
+		}
+	}
+	return aliases
+}
+
+func gitArgsContainPush(tokens []shellToken, aliases map[string]string, inputSources map[int]shellInputSource) bool {
+	return gitArgsContainPushWithState(tokens, aliases, make(map[string]bool), inputSources)
+}
+
+func gitArgsContainPushWithState(tokens []shellToken, aliases map[string]string, seen map[string]bool, inputSources map[int]shellInputSource) bool {
 	optionsWithSeparateValue := map[string]bool{
-		"-C": true, "-c": true, "--git-dir": true, "--work-tree": true,
-		"--namespace": true, "--config-env": true, "--exec-path": true,
+		"-C": true, "--git-dir": true, "--work-tree": true,
+		"--namespace": true, "--exec-path": true,
 	}
 
 	for i := 0; i < len(tokens); i++ {
@@ -1026,12 +1721,47 @@ func gitArgsContainPush(tokens []shellToken) bool {
 			continue
 		}
 		arg := tokens[i].text
+		if arg == "-c" {
+			if i+1 >= len(tokens) || tokens[i+1].kind != wordToken {
+				return false
+			}
+			config := tokens[i+1]
+			if config.maySplit {
+				return true
+			}
+			if name, value, ok := gitAliasDefinition(config.text); ok {
+				if config.dynamic {
+					aliases[name] = dynamicGitAlias
+				} else {
+					aliases[name] = value
+				}
+			}
+			i++
+			continue
+		}
+		if arg == "--config-env" {
+			// Git only accepts the --config-env=<name>=<envvar> form.
+			return false
+		}
+		if config, ok := strings.CutPrefix(arg, "--config-env="); ok {
+			if tokens[i].maySplit {
+				return true
+			}
+			if name, alias := gitConfigEnvAlias(config); alias {
+				aliases[name] = dynamicGitAlias
+			}
+			continue
+		}
+		if strings.HasPrefix(arg, "-c") && len(arg) > 2 {
+			// Unlike -C, Git does not accept an attached value for -c.
+			return false
+		}
 		if tokens[i].dynamic && (!gitOptionHasAttachedValue(arg) || tokens[i].maySplit) {
 			return true
 		}
 		if arg == "--" {
-			i++
-			return i < len(tokens) && tokens[i].kind == wordToken && (tokens[i].dynamic || tokens[i].text == "push")
+			// Git has no global option separator before the subcommand.
+			return false
 		}
 		if strings.HasPrefix(arg, "-") {
 			if optionsWithSeparateValue[arg] {
@@ -1042,9 +1772,154 @@ func gitArgsContainPush(tokens []shellToken) bool {
 			}
 			continue
 		}
-		return arg == "push"
+		if arg == "push" {
+			return true
+		}
+		return gitAliasContainsPush(arg, tokens[i+1:], aliases, seen, inputSources)
 	}
 	return false
+}
+
+func gitAliasDefinition(config string) (name, value string, ok bool) {
+	key, value, ok := strings.Cut(config, "=")
+	if !ok || len(key) <= len("alias.") || !strings.EqualFold(key[:len("alias.")], "alias.") {
+		return "", "", false
+	}
+	return strings.ToLower(key[len("alias."):]), value, true
+}
+
+func gitConfigEnvAlias(config string) (name string, ok bool) {
+	key, _, ok := strings.Cut(config, "=")
+	if !ok || len(key) <= len("alias.") || !strings.EqualFold(key[:len("alias.")], "alias.") {
+		return "", false
+	}
+	return strings.ToLower(key[len("alias."):]), true
+}
+
+func gitAliasContainsPush(name string, invocationArgs []shellToken, aliases map[string]string, seen map[string]bool, inputSources map[int]shellInputSource) bool {
+	name = strings.ToLower(name)
+	if seen[name] {
+		return false
+	}
+	value, ok := aliases[name]
+	if !ok {
+		if isKnownGitCommand(name) {
+			return false
+		}
+		return aliases[dynamicGitAliasName] == dynamicGitAlias
+	}
+	seen[name] = true
+	if value == dynamicGitAlias {
+		return true
+	}
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "!") {
+		command := gitShellAliasCommand(strings.TrimSpace(value[1:]), invocationArgs)
+		childAliases := maps.Clone(aliases)
+		delete(childAliases, name)
+		push, err := containsGitPushWithContext(command, inputSources, childAliases)
+		return err != nil || push
+	}
+	words, err := splitAliasWords(value)
+	if err != nil || len(words) == 0 {
+		return err != nil
+	}
+	expanded := make([]shellToken, 0, len(words)+len(invocationArgs))
+	for _, word := range words {
+		expanded = append(expanded, shellToken{text: word, kind: wordToken})
+	}
+	expanded = append(expanded, invocationArgs...)
+	return gitArgsContainPushWithState(expanded, aliases, seen, inputSources)
+}
+
+func isKnownGitCommand(name string) bool {
+	switch name {
+	case "add", "am", "archive", "bisect", "branch", "bundle", "checkout", "cherry", "cherry-pick", "clean", "clone", "commit", "config", "describe", "diff", "difftool", "fetch", "format-patch", "fsck", "gc", "grep", "init", "log", "maintenance", "merge", "mergetool", "mv", "notes", "pull", "range-diff", "rebase", "reflog", "remote", "repack", "replace", "reset", "restore", "revert", "rm", "shortlog", "show", "show-branch", "sparse-checkout", "stash", "status", "submodule", "switch", "tag", "worktree":
+		return true
+	default:
+		return false
+	}
+}
+
+func gitShellAliasCommand(body string, invocationArgs []shellToken) string {
+	var command strings.Builder
+	command.WriteString(body)
+	for _, arg := range invocationArgs {
+		if arg.kind != wordToken {
+			continue
+		}
+		command.WriteByte(' ')
+		if arg.dynamic {
+			if arg.maySplit {
+				command.WriteString("$AGENT_HOOK_DYNAMIC")
+			} else {
+				command.WriteString("\"$AGENT_HOOK_DYNAMIC\"")
+			}
+			continue
+		}
+		command.WriteByte('\'')
+		command.WriteString(strings.ReplaceAll(arg.text, "'", "'\\''"))
+		command.WriteByte('\'')
+	}
+	return command.String()
+}
+
+func splitAliasWords(value string) ([]string, error) {
+	var words []string
+	var current strings.Builder
+	inWord := false
+	quote := byte(0)
+	flush := func() {
+		if !inWord {
+			return
+		}
+		words = append(words, current.String())
+		current.Reset()
+		inWord = false
+	}
+
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+				continue
+			}
+			if ch == '\\' && quote == '"' {
+				if i+1 >= len(value) {
+					return nil, errors.New("trailing escape in git alias")
+				}
+				i++
+				current.WriteByte(value[i])
+				continue
+			}
+			current.WriteByte(ch)
+			continue
+		}
+
+		switch ch {
+		case '\'', '"':
+			quote = ch
+			inWord = true
+		case '\\':
+			if i+1 >= len(value) {
+				return nil, errors.New("trailing escape in git alias")
+			}
+			i++
+			current.WriteByte(value[i])
+			inWord = true
+		case ' ', '\t', '\r', '\n':
+			flush()
+		default:
+			current.WriteByte(ch)
+			inWord = true
+		}
+	}
+	if quote != 0 {
+		return nil, errors.New("unterminated quote in git alias")
+	}
+	flush()
+	return words, nil
 }
 
 func gitOptionHasAttachedValue(arg string) bool {
@@ -1053,7 +1928,7 @@ func gitOptionHasAttachedValue(arg string) bool {
 			return true
 		}
 	}
-	return len(arg) > 2 && (strings.HasPrefix(arg, "-C") || strings.HasPrefix(arg, "-c"))
+	return len(arg) > 2 && strings.HasPrefix(arg, "-C")
 }
 
 func lexShell(command string) ([]shellToken, error) {
