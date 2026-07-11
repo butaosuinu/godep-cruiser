@@ -12,11 +12,12 @@ GOLANGCI_LINT_CACHE ?= $(CURDIR)/.cache/golangci-lint
 GOLANGCI_LINT_VERSION ?= $(shell cat .golangci-lint-version)
 GOLANGCI_LINT_BIN     := $(CURDIR)/.cache/tools/golangci-lint-$(GOLANGCI_LINT_VERSION)
 
-.PHONY: build test lint fmt vuln clean
+.PHONY: build test lint check fmt vuln clean
 
 # `make build` — compile the CLI binary (gitignored).
 # `make test`  — run Go unit tests.
 # `make lint`  — pinned golangci-lint v2 (.golangci.yml).
+# `make check` — run the required CI gates in order: test, then lint.
 # `make fmt`   — gofumpt/goimports formatting via `golangci-lint fmt`.
 # `make vuln`  — govulncheck via the go.mod tool directive. Kept out of `lint`
 #                on purpose: it fetches the vulnerability DB over the network
@@ -40,6 +41,10 @@ $(GOLANGCI_LINT_BIN):
 
 lint: $(GOLANGCI_LINT_BIN)
 	GOCACHE="$(GOCACHE)" GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE)" "$(GOLANGCI_LINT_BIN)" run
+
+check:
+	$(MAKE) test
+	$(MAKE) lint
 
 fmt: $(GOLANGCI_LINT_BIN)
 	GOCACHE="$(GOCACHE)" GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE)" "$(GOLANGCI_LINT_BIN)" fmt
