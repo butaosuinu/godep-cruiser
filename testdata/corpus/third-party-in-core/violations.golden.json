@@ -1,0 +1,17 @@
+{
+  "name": "third-party purity: reject a module dependency from core",
+  "violations": [
+    {
+      "rule": "core-no-third-party",
+      "severity": "error",
+      "from": {
+        "path": "internal/core/core.go",
+        "line": 3
+      },
+      "to": {
+        "path": "example.net/fixturedep",
+        "dependencyType": "module"
+      }
+    }
+  ]
+}

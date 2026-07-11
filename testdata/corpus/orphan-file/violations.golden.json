@@ -1,0 +1,13 @@
+{
+  "name": "orphan: report a disconnected file",
+  "violations": [
+    {
+      "rule": "no-orphans",
+      "severity": "error",
+      "from": {
+        "path": "internal/lonely/lonely.go",
+        "line": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "package main placement: reject main outside command and tool roots",
+  "violations": [
+    {
+      "rule": "package-main-placement",
+      "severity": "error",
+      "from": {
+        "path": "internal/worker/main.go",
+        "line": 1
+      }
+    }
+  ]
+}

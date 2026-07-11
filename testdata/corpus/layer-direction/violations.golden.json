@@ -1,0 +1,17 @@
+{
+  "name": "layer direction: reject core importing infra",
+  "violations": [
+    {
+      "rule": "layer-direction",
+      "severity": "error",
+      "from": {
+        "path": "internal/core/core.go",
+        "line": 5
+      },
+      "to": {
+        "path": "internal/infra",
+        "dependencyType": "local"
+      }
+    }
+  ]
+}
