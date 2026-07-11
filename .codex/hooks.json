@@ -6,9 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "root=\"$(git rev-parse --show-toplevel)\" || { echo '[agent-hook] failed to resolve project root' >&2; exit 2; }; exec \"$root/scripts/agent-hook.sh\" pre-push",
+            "command": "make -C \"$(git rev-parse --show-toplevel)\" check 1>&2 || exit 2",
             "timeout": 900,
-            "statusMessage": "Running pre-push quality gate"
+            "statusMessage": "Running quality gates"
           }
         ]
       }
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "root=\"$(git rev-parse --show-toplevel)\" || { echo '[agent-hook] failed to resolve project root' >&2; exit 2; }; exec \"$root/scripts/agent-hook.sh\" format",
+            "command": "make -C \"$(git rev-parse --show-toplevel)\" fmt 1>&2 || exit 2",
             "timeout": 600,
             "statusMessage": "Formatting repository"
           }

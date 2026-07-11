@@ -2,14 +2,13 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|Monitor",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/scripts/agent-hook.sh",
-            "args": ["pre-push"],
+            "command": "make -C \"${CLAUDE_PROJECT_DIR}\" check 1>&2 || exit 2",
             "timeout": 900,
-            "statusMessage": "Running pre-push quality gate"
+            "statusMessage": "Running quality gates"
           }
         ]
       }
@@ -20,8 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PROJECT_DIR}/scripts/agent-hook.sh",
-            "args": ["format"],
+            "command": "make -C \"${CLAUDE_PROJECT_DIR}\" fmt 1>&2 || exit 2",
             "timeout": 600,
             "statusMessage": "Formatting repository"
           }
