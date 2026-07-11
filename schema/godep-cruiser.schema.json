@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/butaosuinu/godep-cruiser/main/schema/godep-cruiser.schema.json",
+  "title": "godep-cruiser v0.1 configuration",
+  "description": "Dependency rules for Go source trees. Regular expressions use Go regexp syntax.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "forbidden": {
+      "type": "array",
+      "description": "Rules whose matches produce violations. Rule names must be unique within this array.",
+      "items": {
+        "$ref": "#/$defs/forbiddenRule"
+      }
+    },
+    "allowed": {
+      "type": "array",
+      "description": "Fail-closed allow rules. When present, every dependency must match at least one item. Rule names must be unique within this array.",
+      "items": {
+        "$ref": "#/$defs/allowedRule"
+      }
+    },
+    "allowedSeverity": {
+      "$ref": "#/$defs/severity",
+      "description": "Severity of a dependency that matches no allowed rule.",
+      "default": "warn"
+    }
+  },
+  "$defs": {
+    "severity": {
+      "type": "string",
+      "enum": [
+        "error",
+        "warn",
+        "info",
+        "ignore"
+      ]
+    },
+    "dependencyType": {
+      "type": "string",
+      "enum": [
+        "stdlib",
+        "local",
+        "module",
+        "unresolved"
+      ]
+    },
+    "regexArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      }
+    },
+    "from": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular expressions matched against the importing file path. Captures supply $1, $2, and later references in to.path and to.pathNot."
+        },
+        "pathNot": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular expressions that exclude importing file paths."
+        },
+        "orphan": {
+          "type": "boolean",
+          "description": "Matches files by whether they have no incoming or outgoing dependency."
+        },
+        "packageName": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular expressions matched against the Go package clause name."
+        }
+      }
+    },
+    "to": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular-expression templates matched against the imported path."
+        },
+        "pathNot": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular-expression templates that exclude imported paths."
+        },
+        "dependencyTypes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dependencyType"
+          }
+        },
+        "dependencyTypesNot": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dependencyType"
+          }
+        }
+      }
+    },
+    "forbiddenRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "comment": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/severity",
+          "default": "warn"
+        },
+        "from": {
+          "$ref": "#/$defs/from"
+        },
+        "to": {
+          "$ref": "#/$defs/to"
+        }
+      }
+    },
+    "allowedRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "comment": {
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/from"
+        },
+        "to": {
+          "$ref": "#/$defs/to"
+        }
+      }
+    }
+  }
+}

@@ -29,6 +29,47 @@ must stay dependency-free. Existing Go tools each miss part of that space
 classification, no self-expiring exceptions). godep-cruiser targets that
 gap with a rules model proven by dependency-cruiser.
 
+## Configuration
+
+v0.1 configuration is JSON-only so the runtime remains standard-library-only.
+The published [JSON Schema](schema/godep-cruiser.schema.json) describes every
+accepted field; the loader also validates Go regular expressions, numeric
+capture references, unknown fields, and source positions.
+
+```json
+{
+  "forbidden": [
+    {
+      "name": "features-stay-independent",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/features/([^/]+)/"]
+      },
+      "to": {
+        "path": ["^internal/features/"],
+        "pathNot": ["^internal/features/$1/"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ],
+  "allowed": [
+    {
+      "name": "allow-resolved-dependencies",
+      "from": {},
+      "to": {
+        "dependencyTypes": ["stdlib", "local", "module"]
+      }
+    }
+  ],
+  "allowedSeverity": "error"
+}
+```
+
+`from.path` capture groups can be referenced as `$1`, `$2`, and later numeric
+references in `to.path` and `to.pathNot`. See
+[DESIGN.ja.md](DESIGN.ja.md#設定形式と-loader) for the matching and validation
+semantics.
+
 ## License
 
 [MIT](LICENSE)
