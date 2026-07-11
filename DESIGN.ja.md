@@ -98,13 +98,17 @@ scan root 指定と skip 規則(`testdata/`、`_`・`.` 接頭ディレクトリ
 `go/parser` + `parser.ImportsOnly` で scan root 以下の全 `.go` を parse する。
 build constraint を評価しないので、build tag や OS suffix で現在の
 GOOS/GOARCH から外れるファイルも `_test.go` も検査対象になる。
+skip 規則は scan root 配下のディレクトリに適用し、明示された root 自体は
+名前にかかわらず走査する。
 `packages.Load` 系ツールの検査漏れ(arch-go / depguard の不採用理由の一つ)を
 最初から避ける。型検査はしない。実装は stdlib のみ。
 
 resolver は go.mod の module path を読み、stdlib 判定(先頭セグメントに
 ドットなし)、module 内 import の相対化、それ以外を third-party とする。
-`import "C"`(cgo)は擬似 import として `unresolved` 扱いにするか要検討
-(edge case として設計時に確定)。multi-module / go.work は v0 対象外。
+`import "C"`(cgo)は Go package を指さない擬似 import のため `unresolved`
+として保持する。resolver は呼び出し側が明示した単一の go.mod だけを読み、
+go.work と入れ子 module の自動探索・切り替えは行わない。multi-module /
+go.work は v0 対象外。
 
 ### 自動失効: baseline の 3 状態セマンティクス
 
