@@ -27,9 +27,14 @@ Each expected violation contains:
 
 For a `local` dependency, `to.path` is normalized to a module-relative path.
 For `stdlib`, `module`, and `unresolved` dependencies, it is the import path
-as written. Violation arrays are sorted by rule, severity, from path, line,
-to path, and dependency type. The loader rejects unknown fields, duplicates,
-invalid enum values, and stale source locations.
+as written. The harness mirrors the scanner contract by classifying the cgo
+pseudo-import `C` as `unresolved`. Violation arrays are sorted by rule,
+severity, from path, line, to path, and dependency type. The loader rejects
+unknown fields, duplicates, invalid enum values, and stale source locations.
+
+Baseline inputs and their stale-entry diagnostics are separate from this live
+violation golden. Issue #6 owns those artifacts and the stale corpus case, so
+they will be added together once the baseline output contract exists.
 
 The corpus deliberately does not include rule configuration files. Issue #3
 owns that format. Engine tests can construct rules through the eventual Go API,
