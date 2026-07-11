@@ -20,9 +20,9 @@ Build and lint caches live under `.cache/`. Do not replace the pinned tool versi
 
 ## Agent Hooks
 
-On macOS and Linux, repository hooks for Claude Code and Codex run `make check` directly before every supported agent `Bash` call, including `git push`. A failing gate blocks that call and returns the command output to the agent. After agent `Write`/`Edit` operations (including Codex `apply_patch`), they run `make fmt` directly. `make vuln` is deliberately excluded from the gate.
+On macOS and Linux, repository hooks for Claude Code and Codex use a fixed-string `grep` on `Bash` hook input and run `make check` only when it contains `git push`. A failing gate blocks that call and returns the command output to the agent. After agent `Write`/`Edit` operations (including Codex `apply_patch`), they run `make fmt` directly. `make vuln` is deliberately excluded from the gate.
 
-The hooks intentionally do not parse shell command text; running the gate for every matched shell call keeps the configuration small and deterministic. Codex project hooks must be trusted through `/hooks` before they run. These POSIX hooks do not cover Windows, unsupported tool paths, or regular-terminal pushes and are not native Git hooks; CI remains the final backstop.
+The pre-push filter intentionally does not parse shell syntax; it only recognizes the literal text `git push`. Codex project hooks must be trusted through `/hooks` before they run. These POSIX hooks do not cover Windows, unsupported tool paths, non-literal push spellings, or regular-terminal pushes and are not native Git hooks; CI remains the final backstop.
 
 ## Coding and Architecture Conventions
 
