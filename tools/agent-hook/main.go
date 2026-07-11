@@ -10,13 +10,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 )
 
 const (
-	exitOK    = 0
-	exitBlock = 2
+	exitOK                 = 0
+	exitBlock              = 2
+	dynamicWordPlaceholder = "__AGENT_HOOK_DYNAMIC__"
 )
 
 type hookInput struct {
@@ -26,8 +28,10 @@ type hookInput struct {
 }
 
 type shellToken struct {
-	text string
-	kind tokenKind
+	text     string
+	kind     tokenKind
+	dynamic  bool
+	maySplit bool
 }
 
 type tokenKind uint8
@@ -223,10 +227,16 @@ func isProjectRoot(dir string) bool {
 }
 
 func containsGitPush(command string) (bool, error) {
+	command, hereDocScripts, err := stripHereDocBodies(command)
+	if err != nil {
+		return false, err
+	}
+
 	nested, err := commandSubstitutions(command)
 	if err != nil {
 		return false, err
 	}
+	nested = append(nested, hereDocScripts...)
 	for _, script := range nested {
 		push, nestedErr := containsGitPush(script)
 		if nestedErr != nil {
@@ -261,6 +271,14 @@ func commandSubstitutions(command string) ([]string, error) {
 
 	for i := 0; i < len(command); i++ {
 		ch := command[i]
+		if quote == 0 && ch == '$' && i+1 < len(command) && command[i+1] == '\'' {
+			_, end, ansiErr := parseANSIQuoted(command, i+2)
+			if ansiErr != nil {
+				return nil, ansiErr
+			}
+			i = end
+			continue
+		}
 		if quote == '\'' {
 			if ch == '\'' {
 				quote = 0
@@ -294,6 +312,19 @@ func commandSubstitutions(command string) ([]string, error) {
 			}
 			scripts = append(scripts, command[i+1:end])
 			i = end
+			continue
+		}
+		if quote == 0 && (ch == '<' || ch == '>') && i+1 < len(command) && command[i+1] == '(' {
+			end, err := closingCommandParenthesis(command, i+2)
+			if err != nil {
+				return nil, err
+			}
+			scripts = append(scripts, command[i+2:end])
+			i = end
+			continue
+		}
+		if ch == '$' && i+2 < len(command) && command[i+1] == '(' && command[i+2] == '(' {
+			i += 2
 			continue
 		}
 		if ch == '$' && i+1 < len(command) && command[i+1] == '(' {
@@ -330,6 +361,14 @@ func closingCommandParenthesis(command string, start int) (int, error) {
 	quote := byte(0)
 	for i := start; i < len(command); i++ {
 		ch := command[i]
+		if quote == 0 && ch == '$' && i+1 < len(command) && command[i+1] == '\'' {
+			_, end, ansiErr := parseANSIQuoted(command, i+2)
+			if ansiErr != nil {
+				return 0, ansiErr
+			}
+			i = end
+			continue
+		}
 		if quote == '\'' {
 			if ch == '\'' {
 				quote = 0
@@ -370,23 +409,33 @@ func closingCommandParenthesis(command string, start int) (int, error) {
 }
 
 func segmentContainsGitPush(tokens []shellToken) bool {
+	canUseReservedTime := reservedTimeAllowed(tokens)
+	tokens = shellCommandArguments(tokens)
 	i := skipCommandPrefixes(tokens, 0)
 	if i >= len(tokens) || tokens[i].kind != wordToken {
 		return false
 	}
 
 	for {
+		if tokens[i].dynamic {
+			return true
+		}
 		executable := filepath.Base(tokens[i].text)
 		switch executable {
 		case "command":
+			canUseReservedTime = false
 			i++
 			for i < len(tokens) && tokens[i].kind == wordToken && strings.HasPrefix(tokens[i].text, "-") {
+				if tokens[i].dynamic {
+					return true
+				}
 				if tokens[i].text == "-v" || tokens[i].text == "-V" {
 					return false
 				}
 				i++
 			}
 		case "env":
+			canUseReservedTime = false
 			i++
 			for i < len(tokens) && tokens[i].kind == wordToken {
 				arg := tokens[i].text
@@ -394,8 +443,38 @@ func segmentContainsGitPush(tokens []shellToken) bool {
 					i++
 					continue
 				}
-				if arg == "-u" || arg == "--unset" || arg == "-C" || arg == "--chdir" || arg == "--argv0" {
-					i += 2
+				if tokens[i].dynamic && envOptionHasAttachedValue(arg) {
+					if tokens[i].maySplit {
+						return true
+					}
+					i++
+					continue
+				}
+				if tokens[i].dynamic {
+					return true
+				}
+				if splitValue, split, consumeNext := shortEnvOption(arg); split {
+					return splitStringContainsGitPush(tokens[i+1:], splitValue, consumeNext)
+				} else if consumeNext {
+					var unsafe bool
+					i, unsafe = optionValueEnd(tokens, i+1)
+					if unsafe {
+						return true
+					}
+					continue
+				}
+				if arg == "--split-string" {
+					return splitStringContainsGitPush(tokens[i+1:], "", true)
+				}
+				if value, ok := strings.CutPrefix(arg, "--split-string="); ok {
+					return splitStringContainsGitPush(tokens[i+1:], value, false)
+				}
+				if arg == "--unset" || arg == "--chdir" || arg == "--argv0" {
+					var unsafe bool
+					i, unsafe = optionValueEnd(tokens, i+1)
+					if unsafe {
+						return true
+					}
 					continue
 				}
 				if strings.HasPrefix(arg, "-") {
@@ -408,6 +487,10 @@ func segmentContainsGitPush(tokens []shellToken) bool {
 			return shellCommandContainsGitPush(tokens[i+1:])
 		case "eval":
 			return evaluatedCommandContainsGitPush(tokens[i+1:])
+		case "time":
+			reserved := canUseReservedTime && tokens[i].text == "time"
+			i = skipTimeOptions(tokens, i+1, reserved)
+			canUseReservedTime = reserved
 		default:
 			if !isGitExecutable(tokens[i].text) {
 				return false
@@ -422,37 +505,330 @@ func segmentContainsGitPush(tokens []shellToken) bool {
 	}
 }
 
-func shellCommandContainsGitPush(tokens []shellToken) bool {
+func optionValueEnd(tokens []shellToken, start int) (end int, unsafe bool) {
+	i, ok := nextWordToken(tokens, start)
+	if !ok {
+		return len(tokens), false
+	}
+	return i + 1, tokens[i].maySplit
+}
+
+func reservedTimeAllowed(tokens []shellToken) bool {
+	for _, token := range tokens {
+		if token.kind == redirectToken {
+			return false
+		}
+		if token.kind != wordToken {
+			continue
+		}
+		if isAssignment(token.text) {
+			return false
+		}
+		switch token.text {
+		case "!", "{", "}", "if", "then", "elif", "else", "do", "while", "until":
+			continue
+		default:
+			return true
+		}
+	}
+	return true
+}
+
+func shortEnvOption(arg string) (splitValue string, split bool, consumeNext bool) {
+	if len(arg) < 2 || arg[0] != '-' || strings.HasPrefix(arg, "--") {
+		return "", false, false
+	}
+	options := arg[1:]
+	for i, option := range options {
+		switch option {
+		case 'S':
+			if i+1 < len(options) {
+				return options[i+1:], true, false
+			}
+			return "", true, true
+		case 'u', 'C', 'P':
+			return "", false, i+1 == len(options)
+		}
+	}
+	return "", false, false
+}
+
+func envOptionHasAttachedValue(arg string) bool {
+	for _, prefix := range []string{"--unset=", "--chdir=", "--argv0="} {
+		if strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return len(arg) > 2 && (strings.HasPrefix(arg, "-u") || strings.HasPrefix(arg, "-C") || strings.HasPrefix(arg, "-P"))
+}
+
+func splitStringContainsGitPush(tokens []shellToken, prefix string, consumeValue bool) bool {
+	value := prefix
+	remaining := tokens
+	if consumeValue {
+		for len(remaining) > 0 && remaining[0].kind != wordToken {
+			remaining = remaining[1:]
+		}
+		if len(remaining) == 0 {
+			return false
+		}
+		if remaining[0].dynamic {
+			return true
+		}
+		value = remaining[0].text
+		remaining = remaining[1:]
+	}
+
+	words, err := splitEnvString(value)
+	if err != nil {
+		return true
+	}
+	combined := make([]shellToken, 0, 1+len(words)+len(remaining))
+	combined = append(combined, shellToken{text: "env", kind: wordToken})
+	for _, word := range words {
+		combined = append(combined, shellToken{text: word, kind: wordToken})
+	}
+	combined = append(combined, remaining...)
+	if len(combined) == 0 {
+		return false
+	}
+	return segmentContainsGitPush(combined)
+}
+
+func splitEnvString(value string) ([]string, error) {
+	var words []string
+	var current strings.Builder
+	inWord := false
+	quote := byte(0)
+	flush := func() {
+		if inWord {
+			words = append(words, current.String())
+			current.Reset()
+			inWord = false
+		}
+	}
+
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+				continue
+			}
+			if quote == '"' && ch == '\\' {
+				if i+1 >= len(value) {
+					return nil, errors.New("trailing escape in env split string")
+				}
+				i++
+				if value[i] == 'c' {
+					flush()
+					return words, nil
+				}
+				if value[i] == '_' {
+					current.WriteByte(' ')
+				} else {
+					current.WriteByte(value[i])
+				}
+				continue
+			}
+			if quote == '"' && ch == '$' && i+1 < len(value) && value[i+1] == '{' {
+				return nil, errors.New("environment expansion in env split string")
+			}
+			current.WriteByte(ch)
+			continue
+		}
+
+		switch ch {
+		case '\'', '"':
+			quote = ch
+			inWord = true
+		case '\\':
+			if i+1 >= len(value) {
+				return nil, errors.New("trailing escape in env split string")
+			}
+			i++
+			if value[i] == 'c' {
+				flush()
+				return words, nil
+			}
+			if value[i] == '_' {
+				flush()
+			} else {
+				current.WriteByte(value[i])
+				inWord = true
+			}
+		case '$':
+			if i+1 < len(value) && value[i+1] == '{' {
+				return nil, errors.New("environment expansion in env split string")
+			}
+			current.WriteByte(ch)
+			inWord = true
+		case ' ', '\t', '\r', '\n':
+			flush()
+		default:
+			current.WriteByte(ch)
+			inWord = true
+		}
+	}
+	if quote != 0 {
+		return nil, errors.New("unterminated quote in env split string")
+	}
+	flush()
+	return words, nil
+}
+
+func skipTimeOptions(tokens []shellToken, start int, reserved bool) int {
+	i := start
+	if reserved {
+		for i < len(tokens) && tokens[i].kind == wordToken && tokens[i].text == "-p" {
+			i++
+		}
+		return i
+	}
+	for i < len(tokens) && tokens[i].kind == wordToken {
+		if tokens[i].maySplit {
+			return i
+		}
+		arg := tokens[i].text
+		switch {
+		case arg == "--":
+			return i + 1
+		case arg == "-o" || arg == "--output" || arg == "-f" || arg == "--format":
+			end, unsafe := optionValueEnd(tokens, i+1)
+			if unsafe {
+				return end - 1
+			}
+			i = end
+		case strings.HasPrefix(arg, "--output=") || strings.HasPrefix(arg, "--format="):
+			i++
+		case strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && shortTimeOptionConsumesValue(arg):
+			end, unsafe := optionValueEnd(tokens, i+1)
+			if unsafe {
+				return end - 1
+			}
+			i = end
+		case strings.HasPrefix(arg, "-"):
+			i++
+		default:
+			return i
+		}
+	}
+	return i
+}
+
+func shortTimeOptionConsumesValue(arg string) bool {
+	for i, option := range arg[1:] {
+		if option != 'o' && option != 'f' {
+			continue
+		}
+		return i == len(arg[1:])-1
+	}
+	return false
+}
+
+func shellCommandArguments(tokens []shellToken) []shellToken {
+	arguments := make([]shellToken, 0, len(tokens))
 	for i := 0; i < len(tokens); i++ {
+		if tokens[i].kind == redirectToken {
+			if i+1 < len(tokens) && tokens[i+1].kind == wordToken {
+				i++
+			}
+			continue
+		}
+		arguments = append(arguments, tokens[i])
+	}
+	return arguments
+}
+
+func shellCommandContainsGitPush(tokens []shellToken) bool {
+	for i := 0; i < len(tokens); {
 		if tokens[i].kind != wordToken {
+			i++
 			continue
 		}
 		arg := tokens[i].text
-		hasCommand := arg == "-c" || (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg[1:], "c"))
-		if hasCommand {
-			for i++; i < len(tokens); i++ {
-				if tokens[i].kind != wordToken {
-					continue
-				}
-				push, err := containsGitPush(tokens[i].text)
-				return err != nil || push
+		if tokens[i].dynamic {
+			if shellOptionHasAttachedValue(arg) && !tokens[i].maySplit {
+				i++
+				continue
 			}
+			return true
+		}
+		if arg == "--" {
 			return false
 		}
-		if !strings.HasPrefix(arg, "-") {
+		if strings.HasPrefix(arg, "--") {
+			i++
+			if arg == "--rcfile" || arg == "--init-file" {
+				var ok bool
+				i, ok = nextWordToken(tokens, i)
+				if !ok {
+					return false
+				}
+				if tokens[i].maySplit {
+					return true
+				}
+				i++
+			}
+			continue
+		}
+		if len(arg) < 2 || (arg[0] != '-' && arg[0] != '+') {
 			return false
 		}
-		if arg == "-O" || arg == "+O" || arg == "--rcfile" || arg == "--init-file" {
+
+		options := arg[1:]
+		i++
+		for _, option := range options {
+			if option != 'o' && option != 'O' {
+				continue
+			}
+			var ok bool
+			i, ok = nextWordToken(tokens, i)
+			if !ok {
+				return false
+			}
+			if tokens[i].maySplit {
+				return true
+			}
 			i++
 		}
+		if !strings.ContainsRune(options, 'c') {
+			continue
+		}
+		var ok bool
+		i, ok = nextWordToken(tokens, i)
+		if !ok {
+			return false
+		}
+		if tokens[i].dynamic {
+			return true
+		}
+		push, err := containsGitPush(tokens[i].text)
+		return err != nil || push
 	}
 	return false
+}
+
+func shellOptionHasAttachedValue(arg string) bool {
+	return strings.HasPrefix(arg, "--rcfile=") || strings.HasPrefix(arg, "--init-file=")
+}
+
+func nextWordToken(tokens []shellToken, start int) (int, bool) {
+	for i := start; i < len(tokens); i++ {
+		if tokens[i].kind == wordToken {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func evaluatedCommandContainsGitPush(tokens []shellToken) bool {
 	var words []string
 	for _, token := range tokens {
 		if token.kind == wordToken {
+			if token.dynamic {
+				return true
+			}
 			words = append(words, token.text)
 		}
 	}
@@ -509,6 +885,132 @@ func isGitExecutable(word string) bool {
 	return word == "git" || (filepath.IsAbs(word) && filepath.Base(word) == "git")
 }
 
+func shellParameterExpansionEnd(command string, start int) (end int, ok bool, err error) {
+	if start+1 >= len(command) || command[start] != '$' {
+		return 0, false, nil
+	}
+	next := command[start+1]
+	if next == '{' {
+		end, err := closingParameterExpansion(command, start+2)
+		return end, true, err
+	}
+	if isShellNameStart(next) {
+		end := start + 1
+		for end+1 < len(command) && isShellNameContinue(command[end+1]) {
+			end++
+		}
+		return end, true, nil
+	}
+	if (next >= '0' && next <= '9') || strings.ContainsRune("@*#?$!-_", rune(next)) {
+		return start + 1, true, nil
+	}
+	return 0, false, nil
+}
+
+func parameterExpansionMaySplit(expansion string, quote byte) bool {
+	if quote == 0 {
+		return true
+	}
+	return expansion == "$@" || strings.Contains(expansion, "[@]")
+}
+
+func shellBraceExpansionEnd(command string, start int) (end int, ok bool) {
+	depth := 0
+	quote := byte(0)
+	hasSeparator := false
+	for i := start; i < len(command); i++ {
+		ch := command[i]
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+			} else if quote == '"' && ch == '\\' {
+				i++
+			}
+			continue
+		}
+		if ch == '\\' {
+			i++
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
+		}
+		switch ch {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i, hasSeparator
+			}
+		case ',':
+			if depth > 0 {
+				hasSeparator = true
+			}
+		case '.':
+			if depth > 0 && i+1 < len(command) && command[i+1] == '.' {
+				hasSeparator = true
+			}
+		}
+	}
+	return 0, false
+}
+
+func closingParameterExpansion(command string, start int) (int, error) {
+	depth := 1
+	quote := byte(0)
+	for i := start; i < len(command); i++ {
+		ch := command[i]
+		if quote == 0 && ch == '$' && i+1 < len(command) && command[i+1] == '\'' {
+			_, end, ansiErr := parseANSIQuoted(command, i+2)
+			if ansiErr != nil {
+				return 0, ansiErr
+			}
+			i = end
+			continue
+		}
+		if quote != 0 {
+			if ch == quote {
+				quote = 0
+				continue
+			}
+			if quote == '"' && ch == '\\' {
+				i++
+			}
+			continue
+		}
+		if ch == '\\' {
+			i++
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
+		}
+		if ch == '$' && i+1 < len(command) && command[i+1] == '{' {
+			depth++
+			i++
+			continue
+		}
+		if ch == '}' {
+			depth--
+			if depth == 0 {
+				return i, nil
+			}
+		}
+	}
+	return 0, errors.New("unterminated parameter expansion")
+}
+
+func isShellNameStart(ch byte) bool {
+	return ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
+}
+
+func isShellNameContinue(ch byte) bool {
+	return isShellNameStart(ch) || ch >= '0' && ch <= '9'
+}
+
 func gitArgsContainPush(tokens []shellToken) bool {
 	optionsWithSeparateValue := map[string]bool{
 		"-C": true, "-c": true, "--git-dir": true, "--work-tree": true,
@@ -524,12 +1026,18 @@ func gitArgsContainPush(tokens []shellToken) bool {
 			continue
 		}
 		arg := tokens[i].text
+		if tokens[i].dynamic && (!gitOptionHasAttachedValue(arg) || tokens[i].maySplit) {
+			return true
+		}
 		if arg == "--" {
 			i++
-			return i < len(tokens) && tokens[i].kind == wordToken && tokens[i].text == "push"
+			return i < len(tokens) && tokens[i].kind == wordToken && (tokens[i].dynamic || tokens[i].text == "push")
 		}
 		if strings.HasPrefix(arg, "-") {
 			if optionsWithSeparateValue[arg] {
+				if i+1 < len(tokens) && tokens[i+1].kind == wordToken && tokens[i+1].maySplit {
+					return true
+				}
 				i++
 			}
 			continue
@@ -539,23 +1047,126 @@ func gitArgsContainPush(tokens []shellToken) bool {
 	return false
 }
 
+func gitOptionHasAttachedValue(arg string) bool {
+	for _, prefix := range []string{"--git-dir=", "--work-tree=", "--namespace=", "--config-env=", "--exec-path="} {
+		if strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return len(arg) > 2 && (strings.HasPrefix(arg, "-C") || strings.HasPrefix(arg, "-c"))
+}
+
 func lexShell(command string) ([]shellToken, error) {
 	var tokens []shellToken
 	var current strings.Builder
 	inWord := false
 	quote := byte(0)
+	currentDynamic := false
+	currentMaySplit := false
 
 	flushWord := func() {
 		if !inWord {
 			return
 		}
-		tokens = append(tokens, shellToken{text: current.String(), kind: wordToken})
+		tokens = append(tokens, shellToken{
+			text:     current.String(),
+			kind:     wordToken,
+			dynamic:  currentDynamic,
+			maySplit: currentMaySplit,
+		})
 		current.Reset()
 		inWord = false
+		currentDynamic = false
+		currentMaySplit = false
 	}
 
 	for i := 0; i < len(command); i++ {
 		ch := command[i]
+		if quote == 0 && ch == '$' && i+1 < len(command) && command[i+1] == '\'' {
+			value, end, err := parseANSIQuoted(command, i+2)
+			if err != nil {
+				return nil, err
+			}
+			current.WriteString(value)
+			inWord = true
+			i = end
+			continue
+		}
+		if quote != '\'' && strings.HasPrefix(command[i:], "$((") {
+			end, err := closingCommandParenthesis(command, i+2)
+			if err != nil {
+				return nil, err
+			}
+			current.WriteString(dynamicWordPlaceholder)
+			inWord = true
+			i = end
+			continue
+		}
+		if quote != '\'' && strings.HasPrefix(command[i:], "$(") {
+			end, err := closingCommandParenthesis(command, i+2)
+			if err != nil {
+				return nil, err
+			}
+			current.WriteString(dynamicWordPlaceholder)
+			currentDynamic = true
+			currentMaySplit = currentMaySplit || quote == 0
+			inWord = true
+			i = end
+			continue
+		}
+		if quote == 0 && (ch == '<' || ch == '>') && i+1 < len(command) && command[i+1] == '(' {
+			end, err := closingCommandParenthesis(command, i+2)
+			if err != nil {
+				return nil, err
+			}
+			current.WriteString(dynamicWordPlaceholder)
+			inWord = true
+			i = end
+			continue
+		}
+		if quote != '\'' && ch == '`' {
+			end, err := closingBacktick(command, i+1)
+			if err != nil {
+				return nil, err
+			}
+			current.WriteString(dynamicWordPlaceholder)
+			currentDynamic = true
+			currentMaySplit = currentMaySplit || quote == 0
+			inWord = true
+			i = end
+			continue
+		}
+		if quote == 0 && ch == '$' && i+1 < len(command) && command[i+1] == '"' {
+			current.WriteString(dynamicWordPlaceholder)
+			currentDynamic = true
+			inWord = true
+			continue
+		}
+		if quote != '\'' && ch == '$' {
+			end, ok, err := shellParameterExpansionEnd(command, i)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				current.WriteString(dynamicWordPlaceholder)
+				currentDynamic = true
+				currentMaySplit = currentMaySplit || parameterExpansionMaySplit(command[i:end+1], quote)
+				inWord = true
+				i = end
+				continue
+			}
+		}
+		if quote == 0 && ch == '{' {
+			end, ok := shellBraceExpansionEnd(command, i)
+			if ok {
+				current.WriteString(dynamicWordPlaceholder)
+				currentDynamic = true
+				currentMaySplit = true
+				inWord = true
+				i = end
+				continue
+			}
+		}
 		if quote != 0 {
 			if ch == quote {
 				quote = 0
@@ -620,6 +1231,10 @@ func lexShell(command string) ([]shellToken, error) {
 				tokens = append(tokens, shellToken{text: fileDescriptor + op, kind: kind})
 				continue
 			}
+			if ch == '*' || ch == '?' || ch == '[' {
+				currentDynamic = true
+				currentMaySplit = true
+			}
 			current.WriteByte(ch)
 			inWord = true
 		}
@@ -630,6 +1245,135 @@ func lexShell(command string) ([]shellToken, error) {
 	}
 	flushWord()
 	return tokens, nil
+}
+
+func parseANSIQuoted(command string, start int) (string, int, error) {
+	var value strings.Builder
+	truncated := false
+	writeByte := func(ch byte) {
+		if truncated {
+			return
+		}
+		if ch == 0 {
+			truncated = true
+			return
+		}
+		value.WriteByte(ch)
+	}
+	writeRune := func(char rune) {
+		if truncated {
+			return
+		}
+		if char == 0 {
+			truncated = true
+			return
+		}
+		value.WriteRune(char)
+	}
+	for i := start; i < len(command); i++ {
+		ch := command[i]
+		if ch == '\'' {
+			return value.String(), i, nil
+		}
+		if ch != '\\' {
+			writeByte(ch)
+			continue
+		}
+		if i+1 >= len(command) {
+			return "", 0, errors.New("trailing escape in ANSI-C quoted string")
+		}
+		i++
+		escaped := command[i]
+		switch escaped {
+		case 'a':
+			writeByte('\a')
+		case 'b':
+			writeByte('\b')
+		case 'c':
+			if i+1 >= len(command) {
+				return "", 0, errors.New("incomplete control escape in ANSI-C quoted string")
+			}
+			i++
+			control := command[i] & 0x1f
+			if command[i] == '?' {
+				control = 0x7f
+			}
+			writeByte(control)
+		case 'e', 'E':
+			writeByte(0x1b)
+		case 'f':
+			writeByte('\f')
+		case 'n':
+			writeByte('\n')
+		case 'r':
+			writeByte('\r')
+		case 't':
+			writeByte('\t')
+		case 'v':
+			writeByte('\v')
+		case '\\', '\'', '"':
+			writeByte(escaped)
+		case '\n':
+			// A backslash-newline pair is removed by the shell.
+		case 'x':
+			decoded, consumed, err := parseEscapedNumber(command[i+1:], 16, 2)
+			if err != nil {
+				return "", 0, err
+			}
+			writeByte(byte(decoded))
+			i += consumed
+		case 'u':
+			decoded, consumed, err := parseEscapedNumber(command[i+1:], 16, 4)
+			if err != nil {
+				return "", 0, err
+			}
+			writeRune(rune(decoded))
+			i += consumed
+		case 'U':
+			decoded, consumed, err := parseEscapedNumber(command[i+1:], 16, 8)
+			if err != nil {
+				return "", 0, err
+			}
+			writeRune(rune(decoded))
+			i += consumed
+		default:
+			if escaped >= '0' && escaped <= '7' {
+				decoded, consumed, err := parseEscapedNumber(command[i:], 8, 3)
+				if err != nil {
+					return "", 0, err
+				}
+				writeByte(byte(decoded))
+				i += consumed - 1
+			} else {
+				writeByte('\\')
+				writeByte(escaped)
+			}
+		}
+	}
+	return "", 0, errors.New("unterminated ANSI-C quoted string")
+}
+
+func parseEscapedNumber(input string, base, limit int) (uint64, int, error) {
+	length := 0
+	for length < len(input) && length < limit {
+		ch := input[length]
+		valid := ch >= '0' && ch <= '7'
+		if base == 16 {
+			valid = valid || ch >= '8' && ch <= '9' || ch >= 'a' && ch <= 'f' || ch >= 'A' && ch <= 'F'
+		}
+		if !valid {
+			break
+		}
+		length++
+	}
+	if length == 0 {
+		return 0, 0, errors.New("invalid numeric escape in ANSI-C quoted string")
+	}
+	value, err := strconv.ParseUint(input[:length], base, 32)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse ANSI-C escape: %w", err)
+	}
+	return value, length, nil
 }
 
 func containsOnlyDigits(value string) bool {
