@@ -1,18 +1,20 @@
 package testcorpus
 
 import (
-	"bufio"
 	"fmt"
 	"go/parser"
 	"go/token"
 	"io/fs"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/butaosuinu/godep-cruiser/internal/scanner"
 )
 
 func TestViolationCorpus(t *testing.T) {
@@ -45,12 +47,16 @@ func TestViolationCorpus(t *testing.T) {
 		t.Run(fixture.Name, func(t *testing.T) {
 			t.Parallel()
 
-			modulePath := readFixtureModulePath(t, fixture.ModuleDir)
-			files := parseFixtureModule(t, fixture.ModuleDir, modulePath)
+			resolver, err := scanner.NewResolverFromGoMod(filepath.Join(fixture.ModuleDir, "go.mod"))
+			if err != nil {
+				t.Fatalf("NewResolverFromGoMod() = %v, want nil", err)
+			}
+			files := parseFixtureModule(t, fixture.ModuleDir, resolver)
 			if len(files) == 0 {
 				t.Fatal("parsed 0 Go files, want at least 1")
 			}
 			assertGoldenLocations(t, fixture, files)
+			assertPositiveControlLocations(t, fixture, files)
 			vetFixtureModule(t, fixture.ModuleDir)
 		})
 	}
@@ -68,36 +74,7 @@ type parsedFile struct {
 	imports     []parsedImport
 }
 
-func readFixtureModulePath(t *testing.T, moduleDir string) string {
-	t.Helper()
-
-	file, err := os.Open(filepath.Join(moduleDir, "go.mod"))
-	if err != nil {
-		t.Fatalf("open go.mod: %v", err)
-	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			t.Errorf("close go.mod: %v", err)
-		}
-	}()
-
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		if modulePath, ok := strings.CutPrefix(strings.TrimSpace(scanner.Text()), "module "); ok {
-			if modulePath == "" {
-				t.Fatal("go.mod has an empty module directive")
-			}
-			return modulePath
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("scan go.mod: %v", err)
-	}
-	t.Fatal("go.mod has no module directive")
-	return ""
-}
-
-func parseFixtureModule(t *testing.T, moduleDir, modulePath string) map[string]parsedFile {
+func parseFixtureModule(t *testing.T, moduleDir string, resolver scanner.Resolver) map[string]parsedFile {
 	t.Helper()
 
 	fset := token.NewFileSet()
@@ -130,9 +107,9 @@ func parseFixtureModule(t *testing.T, moduleDir, modulePath string) map[string]p
 			if err != nil {
 				return fmt.Errorf("unquote import in %s: %w", filename, err)
 			}
-			normalized, dependencyType := normalizeImport(modulePath, importPath)
+			targetPath, dependencyType := projectImportForGolden(resolver, importPath)
 			file.imports = append(file.imports, parsedImport{
-				path:           normalized,
+				path:           targetPath,
 				dependencyType: dependencyType,
 				line:           fset.Position(spec.Path.Pos()).Line,
 			})
@@ -150,21 +127,13 @@ func skippedDirectory(name string) bool {
 	return name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_")
 }
 
-func normalizeImport(modulePath, importPath string) (string, string) {
-	if importPath == "C" {
-		return importPath, "unresolved"
+func projectImportForGolden(resolver scanner.Resolver, importPath string) (string, string) {
+	resolution := resolver.Resolve(importPath)
+	targetPath := resolution.Path
+	if targetPath == "" {
+		targetPath = importPath
 	}
-	if importPath == modulePath {
-		return ".", "local"
-	}
-	if local, ok := strings.CutPrefix(importPath, modulePath+"/"); ok {
-		return local, "local"
-	}
-	first, _, _ := strings.Cut(importPath, "/")
-	if !strings.Contains(first, ".") {
-		return importPath, "stdlib"
-	}
-	return importPath, "module"
+	return targetPath, string(resolution.Type)
 }
 
 func assertGoldenLocations(t *testing.T, fixture Case, files map[string]parsedFile) {
@@ -186,8 +155,15 @@ func validateGoldenLocation(violation ExpectedViolation, files map[string]parsed
 		if violation.From.Line != file.packageLine {
 			return fmt.Errorf("source-only golden %s line = %d, want package line %d", violation.Rule, violation.From.Line, file.packageLine)
 		}
-		if violation.Rule == "package-main-placement" && file.packageName != "main" {
-			return fmt.Errorf("source-only golden %s package = %q, want %q", violation.Rule, file.packageName, "main")
+		switch violation.Rule {
+		case "package-main-placement":
+			if file.packageName != "main" {
+				return fmt.Errorf("source-only golden %s package = %q, want %q", violation.Rule, file.packageName, "main")
+			}
+		case "no-orphans":
+			if err := validateOrphanLocation(violation.From.Path, file, files); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -209,47 +185,104 @@ func validateGoldenLocation(violation ExpectedViolation, files map[string]parsed
 	return nil
 }
 
-func TestNormalizeImport(t *testing.T) {
+func validateOrphanLocation(sourcePath string, file parsedFile, files map[string]parsedFile) error {
+	if len(file.imports) != 0 {
+		return fmt.Errorf("source-only golden no-orphans file %s has %d outgoing imports", sourcePath, len(file.imports))
+	}
+
+	packagePath := path.Dir(sourcePath)
+	for importerPath, importer := range files {
+		incoming := slices.ContainsFunc(importer.imports, func(found parsedImport) bool {
+			return found.dependencyType == string(scanner.DependencyTypeLocal) && found.path == packagePath
+		})
+		if incoming {
+			return fmt.Errorf("source-only golden no-orphans file %s has an incoming import from %s", sourcePath, importerPath)
+		}
+	}
+	return nil
+}
+
+func assertPositiveControlLocations(t *testing.T, fixture Case, files map[string]parsedFile) {
+	t.Helper()
+
+	for _, control := range fixture.PositiveControls {
+		if err := validatePositiveControlLocation(control, files); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func validatePositiveControlLocation(control PositiveControl, files map[string]parsedFile) error {
+	file, ok := files[control.From.Path]
+	if !ok {
+		return fmt.Errorf("positive control from.path %q was not parsed", control.From.Path)
+	}
+	if control.To == nil {
+		if control.From.Line != file.packageLine {
+			return fmt.Errorf("positive control %s line = %d, want package line %d", control.Rule, control.From.Line, file.packageLine)
+		}
+		if file.packageName != control.PackageName {
+			return fmt.Errorf("positive control %s package = %q, want %q", control.Rule, file.packageName, control.PackageName)
+		}
+		return nil
+	}
+
+	found := slices.ContainsFunc(file.imports, func(found parsedImport) bool {
+		return found.path == control.To.Path &&
+			found.dependencyType == control.To.DependencyType &&
+			found.line == control.From.Line
+	})
+	if !found {
+		return fmt.Errorf("positive control %s target %q (%s) at line %d does not match an import in %s",
+			control.Rule,
+			control.To.Path,
+			control.To.DependencyType,
+			control.From.Line,
+			control.From.Path,
+		)
+	}
+	return nil
+}
+
+func TestProjectImportForGolden(t *testing.T) {
 	t.Parallel()
 
+	resolver, err := scanner.NewResolver("example.test/fixture")
+	if err != nil {
+		t.Fatalf("NewResolver() = %v, want nil", err)
+	}
 	tests := []struct {
 		name               string
-		modulePath         string
 		importPath         string
 		wantPath           string
 		wantDependencyType string
 	}{
 		{
 			name:               "cgo pseudo-import is unresolved",
-			modulePath:         "example.test/fixture",
 			importPath:         "C",
 			wantPath:           "C",
 			wantDependencyType: "unresolved",
 		},
 		{
 			name:               "module root is local",
-			modulePath:         "example.test/fixture",
 			importPath:         "example.test/fixture",
 			wantPath:           ".",
 			wantDependencyType: "local",
 		},
 		{
 			name:               "module child is relative",
-			modulePath:         "example.test/fixture",
 			importPath:         "example.test/fixture/internal/core",
 			wantPath:           "internal/core",
 			wantDependencyType: "local",
 		},
 		{
 			name:               "standard library import",
-			modulePath:         "example.test/fixture",
 			importPath:         "net/http",
 			wantPath:           "net/http",
 			wantDependencyType: "stdlib",
 		},
 		{
 			name:               "third-party module import",
-			modulePath:         "example.test/fixture",
 			importPath:         "github.com/acme/dependency",
 			wantPath:           "github.com/acme/dependency",
 			wantDependencyType: "module",
@@ -260,9 +293,9 @@ func TestNormalizeImport(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			gotPath, gotDependencyType := normalizeImport(test.modulePath, test.importPath)
+			gotPath, gotDependencyType := projectImportForGolden(resolver, test.importPath)
 			if gotPath != test.wantPath || gotDependencyType != test.wantDependencyType {
-				t.Errorf("normalizeImport() = (%q, %q), want (%q, %q)",
+				t.Errorf("projectImportForGolden() = (%q, %q), want (%q, %q)",
 					gotPath,
 					gotDependencyType,
 					test.wantPath,
@@ -280,6 +313,11 @@ func TestValidateGoldenLocation(t *testing.T) {
 		Rule:     "package-main-placement",
 		Severity: "error",
 		From:     Location{Path: "internal/worker/main.go", Line: 1},
+	}
+	orphan := ExpectedViolation{
+		Rule:     "no-orphans",
+		Severity: "error",
+		From:     Location{Path: "internal/lonely/lonely.go", Line: 1},
 	}
 	tests := []struct {
 		name      string
@@ -303,15 +341,40 @@ func TestValidateGoldenLocation(t *testing.T) {
 			wantError: `package = "worker", want "main"`,
 		},
 		{
-			name: "other source-only rule accepts a non-main package",
-			violation: ExpectedViolation{
-				Rule:     "no-orphans",
-				Severity: "error",
-				From:     Location{Path: "internal/lonely/lonely.go", Line: 1},
-			},
+			name:      "disconnected file matches orphan golden",
+			violation: orphan,
 			files: map[string]parsedFile{
 				"internal/lonely/lonely.go": {packageName: "lonely", packageLine: 1},
 			},
+		},
+		{
+			name:      "outgoing import rejects orphan golden",
+			violation: orphan,
+			files: map[string]parsedFile{
+				"internal/lonely/lonely.go": {
+					packageName: "lonely",
+					packageLine: 1,
+					imports: []parsedImport{
+						{path: "fmt", dependencyType: "stdlib", line: 3},
+					},
+				},
+			},
+			wantError: "outgoing imports",
+		},
+		{
+			name:      "incoming import rejects orphan golden",
+			violation: orphan,
+			files: map[string]parsedFile{
+				"cmd/app/main.go": {
+					packageName: "main",
+					packageLine: 1,
+					imports: []parsedImport{
+						{path: "internal/lonely", dependencyType: "local", line: 3},
+					},
+				},
+				"internal/lonely/lonely.go": {packageName: "lonely", packageLine: 1},
+			},
+			wantError: "incoming import",
 		},
 	}
 
@@ -328,6 +391,145 @@ func TestValidateGoldenLocation(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
 				t.Fatalf("validateGoldenLocation() = %v, want error containing %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestValidatePositiveControlLocation(t *testing.T) {
+	t.Parallel()
+
+	importControl := PositiveControl{
+		Rule: "layer-direction",
+		From: Location{Path: "internal/core/core.go", Line: 3},
+		To:   &Dependency{Path: "internal/model", DependencyType: "local"},
+	}
+	packageControl := PositiveControl{
+		Rule:        "package-main-placement",
+		From:        Location{Path: "cmd/app/main.go", Line: 1},
+		PackageName: "main",
+	}
+	tests := []struct {
+		name      string
+		control   PositiveControl
+		files     map[string]parsedFile
+		wantError string
+	}{
+		{
+			name:    "import control matches",
+			control: importControl,
+			files: map[string]parsedFile{
+				"internal/core/core.go": {
+					packageName: "core",
+					packageLine: 1,
+					imports: []parsedImport{
+						{path: "internal/model", dependencyType: "local", line: 3},
+					},
+				},
+			},
+		},
+		{
+			name:    "missing import rejects control",
+			control: importControl,
+			files: map[string]parsedFile{
+				"internal/core/core.go": {packageName: "core", packageLine: 1},
+			},
+			wantError: "does not match an import",
+		},
+		{
+			name:    "package control matches",
+			control: packageControl,
+			files: map[string]parsedFile{
+				"cmd/app/main.go": {packageName: "main", packageLine: 1},
+			},
+		},
+		{
+			name:    "different package rejects control",
+			control: packageControl,
+			files: map[string]parsedFile{
+				"cmd/app/main.go": {packageName: "app", packageLine: 1},
+			},
+			wantError: `package = "app", want "main"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validatePositiveControlLocation(test.control, test.files)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("validatePositiveControlLocation() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("validatePositiveControlLocation() = %v, want error containing %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestValidatePositiveControl(t *testing.T) {
+	t.Parallel()
+
+	moduleDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(moduleDir, "source.go"), []byte("package fixture\n"), 0o600); err != nil {
+		t.Fatalf("write source.go: %v", err)
+	}
+	location := Location{Path: "source.go", Line: 1}
+	tests := []struct {
+		name      string
+		control   PositiveControl
+		wantError string
+	}{
+		{
+			name: "import control",
+			control: PositiveControl{
+				Rule: "rule",
+				From: location,
+				To:   &Dependency{Path: "fmt", DependencyType: "stdlib"},
+			},
+		},
+		{
+			name: "package control",
+			control: PositiveControl{
+				Rule:        "rule",
+				From:        location,
+				PackageName: "fixture",
+			},
+		},
+		{
+			name:      "missing control shape",
+			control:   PositiveControl{Rule: "rule", From: location},
+			wantError: "exactly one",
+		},
+		{
+			name: "ambiguous control shape",
+			control: PositiveControl{
+				Rule:        "rule",
+				From:        location,
+				To:          &Dependency{Path: "fmt", DependencyType: "stdlib"},
+				PackageName: "fixture",
+			},
+			wantError: "exactly one",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validatePositiveControl(moduleDir, test.control)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("validatePositiveControl() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("validatePositiveControl() = %v, want error containing %q", err, test.wantError)
 			}
 		})
 	}

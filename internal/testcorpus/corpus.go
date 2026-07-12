@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/token"
 	"io"
 	"io/fs"
 	"os"
@@ -23,7 +24,8 @@ type Location struct {
 	Line int    `json:"line"`
 }
 
-// Dependency identifies the normalized target of an import edge.
+// Dependency identifies an import edge's comparison target. Path is the
+// normalized resolver path, or the raw source path when resolution has no path.
 type Dependency struct {
 	Path           string `json:"path"`
 	DependencyType string `json:"dependencyType"`
@@ -38,12 +40,22 @@ type ExpectedViolation struct {
 	To       *Dependency `json:"to,omitempty"`
 }
 
+// PositiveControl identifies source facts that must remain present but must not
+// appear in the engine's violation output.
+type PositiveControl struct {
+	Rule        string      `json:"rule"`
+	From        Location    `json:"from"`
+	To          *Dependency `json:"to,omitempty"`
+	PackageName string      `json:"packageName,omitempty"`
+}
+
 // Case describes one standalone fixture module and its expected violations.
 type Case struct {
-	ID         string              `json:"-"`
-	Name       string              `json:"name"`
-	ModuleDir  string              `json:"-"`
-	Violations []ExpectedViolation `json:"violations"`
+	ID               string              `json:"-"`
+	Name             string              `json:"name"`
+	ModuleDir        string              `json:"-"`
+	PositiveControls []PositiveControl   `json:"positiveControls,omitempty"`
+	Violations       []ExpectedViolation `json:"violations"`
 }
 
 // Load discovers and validates all fixture modules directly below root.
@@ -128,6 +140,9 @@ func validateCase(fixture Case) error {
 	if len(fixture.Violations) == 0 {
 		return errors.New("violations must not be empty")
 	}
+	if err := validatePositiveControls(fixture); err != nil {
+		return err
+	}
 
 	seen := make(map[string]struct{}, len(fixture.Violations))
 	previousKey := ""
@@ -148,6 +163,26 @@ func validateCase(fixture Case) error {
 	return nil
 }
 
+func validatePositiveControls(fixture Case) error {
+	seen := make(map[string]struct{}, len(fixture.PositiveControls))
+	previousKey := ""
+	for i, control := range fixture.PositiveControls {
+		if err := validatePositiveControl(fixture.ModuleDir, control); err != nil {
+			return fmt.Errorf("positiveControls[%d]: %w", i, err)
+		}
+		key := positiveControlKey(control)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("positiveControls[%d] duplicates %q", i, key)
+		}
+		if i > 0 && key < previousKey {
+			return fmt.Errorf("positiveControls must be sorted; %q appears after %q", key, previousKey)
+		}
+		seen[key] = struct{}{}
+		previousKey = key
+	}
+	return nil
+}
+
 func validCaseName(name string) bool {
 	family, behavior, ok := strings.Cut(name, ": ")
 	return ok && family != "" && behavior != "" && !strings.Contains(behavior, ": ")
@@ -160,26 +195,58 @@ func validateViolation(moduleDir string, violation ExpectedViolation) error {
 	if !validSeverity(violation.Severity) {
 		return fmt.Errorf("severity %q is not error, warn, info, or ignore", violation.Severity)
 	}
-	if !validGoPath(violation.From.Path) {
-		return fmt.Errorf("from.path %q is not a module-relative .go path", violation.From.Path)
-	}
-	if violation.From.Line < 1 {
-		return errors.New("from.line must be positive")
-	}
-	if err := requireFile(filepath.Join(moduleDir, filepath.FromSlash(violation.From.Path))); err != nil {
-		return fmt.Errorf("from.path: %w", err)
+	if err := validateLocation(moduleDir, violation.From); err != nil {
+		return err
 	}
 	if violation.To == nil {
 		return nil
 	}
-	if violation.To.Path == "" {
+	return validateDependency(*violation.To)
+}
+
+func validatePositiveControl(moduleDir string, control PositiveControl) error {
+	if control.Rule == "" {
+		return errors.New("rule must not be empty")
+	}
+	if err := validateLocation(moduleDir, control.From); err != nil {
+		return err
+	}
+	hasDependency := control.To != nil
+	hasPackageName := control.PackageName != ""
+	if hasDependency == hasPackageName {
+		return errors.New("exactly one of to or packageName must be set")
+	}
+	if hasDependency {
+		return validateDependency(*control.To)
+	}
+	if !token.IsIdentifier(control.PackageName) {
+		return fmt.Errorf("packageName %q is not a Go identifier", control.PackageName)
+	}
+	return nil
+}
+
+func validateLocation(moduleDir string, location Location) error {
+	if !validGoPath(location.Path) {
+		return fmt.Errorf("from.path %q is not a module-relative .go path", location.Path)
+	}
+	if location.Line < 1 {
+		return errors.New("from.line must be positive")
+	}
+	if err := requireFile(filepath.Join(moduleDir, filepath.FromSlash(location.Path))); err != nil {
+		return fmt.Errorf("from.path: %w", err)
+	}
+	return nil
+}
+
+func validateDependency(dependency Dependency) error {
+	if dependency.Path == "" {
 		return errors.New("to.path must not be empty")
 	}
-	if !validDependencyType(violation.To.DependencyType) {
-		return fmt.Errorf("to.dependencyType %q is not stdlib, local, module, or unresolved", violation.To.DependencyType)
+	if !validDependencyType(dependency.DependencyType) {
+		return fmt.Errorf("to.dependencyType %q is not stdlib, local, module, or unresolved", dependency.DependencyType)
 	}
-	if violation.To.DependencyType == "local" && violation.To.Path != "." && !validRelativePath(violation.To.Path) {
-		return fmt.Errorf("local to.path %q is not module-relative", violation.To.Path)
+	if dependency.DependencyType == "local" && dependency.Path != "." && !validRelativePath(dependency.Path) {
+		return fmt.Errorf("local to.path %q is not module-relative", dependency.Path)
 	}
 	return nil
 }
@@ -224,5 +291,22 @@ func violationKey(violation ExpectedViolation) string {
 		fmt.Sprintf("%09d", violation.From.Line),
 		toPath,
 		dependencyType,
+	}, "\x00")
+}
+
+func positiveControlKey(control PositiveControl) string {
+	toPath := ""
+	dependencyType := ""
+	if control.To != nil {
+		toPath = control.To.Path
+		dependencyType = control.To.DependencyType
+	}
+	return strings.Join([]string{
+		control.Rule,
+		control.From.Path,
+		fmt.Sprintf("%09d", control.From.Line),
+		toPath,
+		dependencyType,
+		control.PackageName,
 	}, "\x00")
 }

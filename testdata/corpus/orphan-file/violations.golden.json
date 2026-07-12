@@ -1,5 +1,18 @@
 {
   "name": "orphan: report a disconnected file",
+  "positiveControls": [
+    {
+      "rule": "no-orphans",
+      "from": {
+        "path": "cmd/app/main.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/connected",
+        "dependencyType": "local"
+      }
+    }
+  ],
   "violations": [
     {
       "rule": "no-orphans",

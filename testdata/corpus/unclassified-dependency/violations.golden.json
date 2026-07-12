@@ -1,5 +1,18 @@
 {
   "name": "allowed fail-closed: reject an unclassified local dependency",
+  "positiveControls": [
+    {
+      "rule": "dependencies-must-be-classified",
+      "from": {
+        "path": "internal/app/app.go",
+        "line": 4
+      },
+      "to": {
+        "path": "internal/core",
+        "dependencyType": "local"
+      }
+    }
+  ],
   "violations": [
     {
       "rule": "dependencies-must-be-classified",
