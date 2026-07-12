@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grep -F 'git push' >/dev/null || exit 0; make -C \"$(git rev-parse --show-toplevel)\" check 1>&2 || exit 2",
+            "timeout": 900,
+            "statusMessage": "Checking pre-push quality gate"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "make -C \"$(git rev-parse --show-toplevel)\" fmt 1>&2 || exit 2",
+            "timeout": 600,
+            "statusMessage": "Formatting repository"
+          }
+        ]
+      }
+    ]
+  }
+}
