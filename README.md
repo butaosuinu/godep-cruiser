@@ -70,6 +70,46 @@ references in `to.path` and `to.pathNot`. See
 [DESIGN.ja.md](DESIGN.ja.md#設定形式と-loader) for the matching and validation
 semantics.
 
+## Baseline
+
+A baseline is a strict JSON document containing exact violation keys:
+
+```json
+{
+  "entries": [
+    {
+      "rule": "features-stay-independent",
+      "from": "internal/features/orders/service.go",
+      "to": "example.com/project/internal/features/payments"
+    },
+    {
+      "rule": "no-orphans",
+      "from": "internal/legacy/unused.go"
+    }
+  ]
+}
+```
+
+For an import edge, the key is `rule` + `from` + `to`, where `to` is the raw
+import path written in the Go source rather than a resolved path. Source-only
+violations such as orphan and package-name rules omit `to` and match on the
+pair `rule` and `from`.
+
+The baseline has three outcomes:
+
+- An unlisted current violation is reported with its configured severity; a
+  baseline never upgrades it.
+- A matching current violation is known and suppressed.
+- An entry with no matching current violation is always a stale error whose
+  diagnostic tells the user to remove the entry from the baseline.
+
+Generated entries are sorted and deduplicated. Loading rejects unknown fields,
+empty keys, duplicate keys, and trailing JSON, but does not require referenced
+files or imports to still exist because stale entries may point to deleted
+source. Regex entries, `//nolint` directives, and date-based expiry are not
+supported; exact keys make stale detection deterministic, and entries expire
+when their violations disappear.
+
 ## License
 
 [MIT](LICENSE)

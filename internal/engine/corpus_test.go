@@ -55,6 +55,17 @@ func corpusConfigurations() map[string]config.Config {
 	orphan := true
 
 	return map[string]config.Config{
+		"baseline-expiry": {
+			Forbidden: []config.ForbiddenRule{{
+				Name:     "core-no-adapters",
+				Severity: config.SeverityWarn,
+				From:     config.From{Path: []string{`^internal/core/`}},
+				To: config.To{
+					Path:            []string{`^internal/adapters/`},
+					DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
+				},
+			}},
+		},
 		"forbidden-import-target": {
 			Forbidden: []config.ForbiddenRule{{
 				Name:     "entrypoint-not-importable",
