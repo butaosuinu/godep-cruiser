@@ -1,0 +1,17 @@
+{
+  "name": "baseline expiry: preserve a known warning and reject a stale entry",
+  "violations": [
+    {
+      "rule": "core-no-adapters",
+      "severity": "warn",
+      "from": {
+        "path": "internal/core/core.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/adapters/live",
+        "dependencyType": "local"
+      }
+    }
+  ]
+}

@@ -147,17 +147,28 @@ go.work は v0 対象外。
 
 ### 自動失効: baseline の 3 状態セマンティクス
 
-差別化の本体。本家 baseline との差分だけを設計する。
+差別化の本体として、本家 baseline にはない stale 検出を加える。
+baseline は既知違反の抑止と失効検出だけを担い、ルールに設定済みの severity を変更しない。
 
-- baseline にない違反 → error
-- baseline にある違反 → ignore(または info)
-- **違反が消えた baseline エントリ → stale error**(本家にない新規部分)
+- baseline にない現在の違反 → 設定済み severity のまま報告する
+- baseline にある現在の違反 → known として通常の違反報告から抑止する
+- **現在の違反に対応しない baseline エントリ → severity にかかわらず stale error にする**(本家にない新規部分)。
+  診断では、そのエントリを baseline から削除するよう示す
 
-失効判定を決定可能にするため、baseline エントリは regex でなく完全一致
-(from ファイルパス + to import パス + ルール名)で記録する。
-`//nolint` 型のコメントディレクティブは対応しない — 例外は設定と baseline に
-集約し、失効検出を一元化する。expiry date(期限日)方式も不採用: 使われなく
-なったら死ぬ仕組みがあれば日付は不要。
+baseline はトップレベルを `{ "entries": [...] }` とする JSON であり、各エントリに `rule`、`from`、任意の `to` を置く。
+edge 違反の完全一致キーは、ルール名、from ファイルパス、ソースに記述されたままの raw import path で構成する。
+raw import path は `to` に記録する。
+resolver が返す path は module path の変更で変わり得るため、baseline のキーには使わない。
+orphan や packageName の source-only 違反は `to` を省略し、ルール名と from ファイルパスで照合する。
+生成時はキー順にソートして重複を除き、読み込み時は未知フィールド、空のキー、重複キー、末尾の余分な JSON を拒否する。
+stale エントリは削除済みのファイルや import を指し得るため、読み込み時に参照先の存在を要求しない。
+
+失効判定を決定可能にするため、baseline エントリは regex ではなく完全一致で記録する。
+regex を許すと複数のエントリが同じ違反に重なり、どの例外がその違反を保持しているかが一意に決まらない。
+完全一致キーなら、現在の違反キーと baseline エントリの差集合として stale を判定できる。
+`//nolint` 型のコメントディレクティブには対応せず、例外を設定と baseline に集約して失効検出を一元化する。
+expiry date(期限日)方式も採用しない。
+対応する違反が消えた時点で stale error になるため、日付による期限は不要である。
 
 ### 空回りの fail-closed
 

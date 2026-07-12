@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "rule": "core-no-adapters",
+      "from": "internal/core/core.go",
+      "to": "example.test/baseline-expiry/internal/adapters/live"
+    },
+    {
+      "rule": "core-no-adapters",
+      "from": "internal/core/core.go",
+      "to": "example.test/baseline-expiry/internal/adapters/removed"
+    }
+  ]
+}

@@ -27,6 +27,7 @@ func TestViolationCorpus(t *testing.T) {
 	}
 
 	wantIDs := []string{
+		"baseline-expiry",
 		"forbidden-import-target",
 		"layer-direction",
 		"orphan-file",

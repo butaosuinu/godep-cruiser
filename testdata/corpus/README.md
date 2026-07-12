@@ -49,9 +49,14 @@ outside `cmd/` and `tools/` from the parsed fixture. It rejects any such
 source-only violation that is not listed in the golden, so adding another bad
 file cannot silently weaken these cases.
 
-Baseline inputs and their stale-entry diagnostics are separate from this live
-violation golden. Issue #6 owns those artifacts and the stale corpus case, so
-they will be added together once the baseline output contract exists.
+The `baseline-expiry` module also pins baseline matching and expiry with two
+additional artifacts. `baseline.json` is an input containing exact raw import
+keys. `baseline.golden.json` projects the expected three states: `violations`
+for unmatched live violations, `known` for matched live violations, and
+`stale` for baseline entries whose violation disappeared. Stale entries add
+the exact diagnostic telling the user which entry to remove. These artifacts
+remain separate from `violations.golden.json`, whose import target is the
+resolver-normalized path used by the engine corpus.
 
 The corpus deliberately does not include rule configuration files. Issue #3
 owns that format. Engine tests can construct rules through the eventual Go API,
@@ -62,6 +67,7 @@ and compare them with the golden list.
 
 | Directory | Case pinned by the module |
 |---|---|
+| `baseline-expiry` | A raw-path baseline match preserves the live violation's configured severity while a removed import becomes a stale error with an exact deletion diagnostic. |
 | `layer-direction` | Core may import core and a pinned migration file may import infra, but another core-to-infra edge is rejected. |
 | `stdlib-denylist-exception` | Exact stdlib bans honor a package/import exception without exempting sibling imports. |
 | `third-party-in-core` | Core rejects a third-party module dependency. |
@@ -71,7 +77,8 @@ and compare them with the golden list.
 | `package-main-placement` | `package main` is rejected outside approved command and tool roots. |
 | `unclassified-dependency` | An allowed-rule set fails closed on an unclassified local dependency. |
 
-These are the eight semantic cases owned by issue #4. They are inspired by
+The first eight semantic cases are owned by issue #4; `baseline-expiry` is the
+ninth case and is owned by issue #6. They are inspired by
 fanout's architecture checks but are not a one-to-one copy of its test
 functions; filesystem tree-shape checks remain outside the import graph's
 scope.
