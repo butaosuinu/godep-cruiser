@@ -45,11 +45,17 @@ type mermaidEdge struct {
 // flowchart. The engine exposes violations rather than the complete scanned
 // graph, so every emitted edge is a violation and is highlighted.
 func WriteMermaid(writer io.Writer, violations []engine.Violation) error {
-	nodes, edges := buildMermaidGraph(violations)
+	return WriteMermaidReport(writer, Report{Violations: violations})
+}
+
+// WriteMermaidReport writes the violation-induced dependency subgraph and a
+// standalone error node for every stale baseline entry.
+func WriteMermaidReport(writer io.Writer, report Report) error {
+	nodes, edges := buildMermaidGraph(report.Violations)
 
 	var output strings.Builder
 	output.WriteString("flowchart LR\n")
-	if len(nodes) == 0 {
+	if len(nodes) == 0 && len(report.Stale) == 0 {
 		output.WriteString("  no_violations[\"No violations\"]\n")
 
 		return writeMermaidOutput(writer, output.String())
@@ -61,6 +67,14 @@ func WriteMermaid(writer io.Writer, violations []engine.Violation) error {
 			label += " (" + strings.Join(node.sourceViolationLabels, "; ") + ")"
 		}
 		fmt.Fprintf(&output, "  %s[\"%s\"]\n", node.id, escapeMermaidLabel(label))
+	}
+	for index, stale := range report.Stale {
+		fmt.Fprintf(
+			&output,
+			"  stale%d[\"%s\"]\n",
+			index,
+			escapeMermaidLabel("[error] "+stale.Error()),
+		)
 	}
 	for _, edge := range edges {
 		label := fmt.Sprintf("line %d: %s", edge.line, strings.Join(edge.violationLabels, "; "))
@@ -86,6 +100,12 @@ func WriteMermaid(writer io.Writer, violations []engine.Violation) error {
 			if len(node.sourceViolationLabels) > 0 {
 				fmt.Fprintf(&output, "  class %s sourceViolation\n", node.id)
 			}
+		}
+	}
+	if len(report.Stale) > 0 {
+		output.WriteString("  classDef staleBaselineError fill:#ffebe9,stroke:#cf222e,stroke-width:2px\n")
+		for index := range report.Stale {
+			fmt.Fprintf(&output, "  class stale%d staleBaselineError\n", index)
 		}
 	}
 	if len(edges) > 0 {

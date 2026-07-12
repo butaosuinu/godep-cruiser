@@ -1,0 +1,2 @@
+[error] rule "layer-direction": internal/core/core.go:5 -> internal/infra (local): forbidden dependency
+  fix: move the dependency behind a core-owned interface

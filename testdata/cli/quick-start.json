@@ -1,0 +1,26 @@
+{
+  "forbidden": [
+    {
+      "name": "features-stay-independent",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/features/([^/]+)/"]
+      },
+      "to": {
+        "path": ["^internal/features/"],
+        "pathNot": ["^internal/features/$1/"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ],
+  "allowed": [
+    {
+      "name": "allow-resolved-dependencies",
+      "from": {},
+      "to": {
+        "dependencyTypes": ["stdlib", "local", "module"]
+      }
+    }
+  ],
+  "allowedSeverity": "error"
+}

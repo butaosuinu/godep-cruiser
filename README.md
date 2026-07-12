@@ -15,10 +15,43 @@ No code is translated from dependency-cruiser; the design derives from its
 public documentation and observable behavior. Not affiliated with the
 upstream project.
 
-## Status
+## Quick start
 
-Design phase. See [DESIGN.ja.md](DESIGN.ja.md) (Japanese) for the design
-document and the v0.1 scope. Implementation is tracked in the issues.
+Install the command from the module root:
+
+```sh
+go install github.com/butaosuinu/godep-cruiser@latest
+```
+
+Save a rule configuration as `godep-cruiser.json` (the complete example in
+[Configuration](#configuration) is valid), then validate the current module:
+
+```sh
+godep-cruiser --config godep-cruiser.json --scan-root .
+```
+
+Human-readable `err` output is the default. JSON and Mermaid are selected
+explicitly:
+
+```sh
+godep-cruiser --config godep-cruiser.json --scan-root . --output-type json
+godep-cruiser --config godep-cruiser.json --scan-root . --output-type mermaid
+```
+
+Generate and then apply an exact-match baseline:
+
+```sh
+godep-cruiser --config godep-cruiser.json --scan-root . \
+  --generate-baseline > godep-cruiser-baseline.json
+
+godep-cruiser --config godep-cruiser.json --scan-root . \
+  --baseline godep-cruiser-baseline.json
+```
+
+Validation exits with the number of unsuppressed `error` violations plus stale
+baseline entries. Warnings and informational violations are still reported but
+do not make the command fail. Flag, configuration, scan, and output failures
+exit 2; successful baseline generation exits 0.
 
 ## Why
 
@@ -69,6 +102,34 @@ capture references, unknown fields, and source positions.
 references in `to.path` and `to.pathNot`. See
 [DESIGN.ja.md](DESIGN.ja.md#設定形式と-loader) for the matching and validation
 semantics.
+
+## Library API
+
+The public facade is importable independently of the CLI. Configuration load,
+scan, validation, optional baseline filtering, reporting, and error counting
+remain ordinary Go calls:
+
+```go
+configuration, err := config.LoadFile("godep-cruiser.json")
+if err != nil {
+	return err
+}
+result, err := cruiser.Validate(configuration, cruiser.Options{ScanRoot: "."})
+if err != nil {
+	return err
+}
+if err := cruiser.WriteReport(os.Stdout, cruiser.OutputTypeErr, result); err != nil {
+	return err
+}
+if result.ErrorCount() != 0 {
+	return fmt.Errorf("dependency validation failed with %d errors", result.ErrorCount())
+}
+```
+
+Import `github.com/butaosuinu/godep-cruiser/config` and
+`github.com/butaosuinu/godep-cruiser/cruiser` for the snippet above. Set
+`Options.GoModPath` when the module file is not `<ScanRoot>/go.mod`; no
+`go.work` or nested-module discovery is performed.
 
 ## Baseline
 

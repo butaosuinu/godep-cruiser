@@ -2,7 +2,7 @@
 
 ## Project Structure and Sources of Truth
 
-`cmd/godep-cruiser/` contains the deliberately thin CLI. Put reusable validation logic in importable packages rather than growing `package main`; the exact package layout is owned by the implementation issues. `DESIGN.ja.md` is the canonical v0.1 design, `README.md` is the public overview, and GitHub issues #1-#9 define scope and dependency order. If an implementation changes a design decision, update `DESIGN.ja.md` in the same change.
+The module-root `main.go` is the deliberately thin `go install` entry point, and `cmd/godep-cruiser/` is the compatibility entry point; both call the same shared runner. Put reusable validation logic in importable packages rather than growing either `package main`; the public facade lives in `cruiser/`. `DESIGN.ja.md` is the canonical v0.1 design, `README.md` is the public overview, and GitHub issues #1-#9 define scope and dependency order. If an implementation changes a design decision, update `DESIGN.ja.md` in the same change.
 
 This project is a clean-room Go reimplementation of dependency-cruiser concepts. Use only public documentation and observable behavior; do not translate upstream JavaScript. Modifying or adopting the tool in fanout is outside this repository's scope.
 

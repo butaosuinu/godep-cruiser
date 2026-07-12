@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/butaosuinu/godep-cruiser/internal/baseline"
 	"github.com/butaosuinu/godep-cruiser/internal/engine"
 )
 
@@ -46,6 +47,58 @@ func TestSummarize(t *testing.T) {
 
 			if got := Summarize(test.violations); got != test.want {
 				t.Errorf("Summarize() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestSummarizeReport(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		report Report
+		want   Summary
+	}{
+		{
+			name: "empty report",
+		},
+		{
+			name: "stale entries are errors",
+			report: Report{
+				Stale: []baseline.StaleError{
+					{Entry: baseline.Entry{Rule: "removed", From: "old.go"}},
+					{Entry: baseline.Entry{Rule: "also-removed", From: "older.go"}},
+				},
+			},
+			want: Summary{Total: 2, Error: 2},
+		},
+		{
+			name: "stale entries are added to violation counts",
+			report: Report{
+				Violations: []engine.Violation{
+					{Severity: "error"},
+					{Severity: "warn"},
+					{Severity: "info"},
+					{Severity: "ignore"},
+				},
+				Stale: []baseline.StaleError{{
+					Entry: baseline.Entry{Rule: "removed", From: "old.go"},
+				}},
+			},
+			want: Summary{Total: 5, Error: 2, Warn: 1, Info: 1, Ignore: 1},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := SummarizeReport(test.report); got != test.want {
+				t.Errorf("SummarizeReport() = %#v, want %#v", got, test.want)
+			}
+			if got := ReportErrorCount(test.report); got != test.want.Error {
+				t.Errorf("ReportErrorCount() = %d, want %d", got, test.want.Error)
 			}
 		})
 	}
@@ -163,18 +216,98 @@ func TestWriteErrSpecialCases(t *testing.T) {
 	}
 }
 
+func TestWriteErrReportStaleBaselineEntries(t *testing.T) {
+	t.Parallel()
+
+	edgeTarget := "example.com/removed"
+	tests := []struct {
+		name   string
+		report Report
+		want   string
+	}{
+		{
+			name: "source-only stale entry",
+			report: Report{Stale: []baseline.StaleError{{
+				Entry: baseline.Entry{Rule: "old-source-rule", From: "old.go"},
+			}}},
+			want: "[error] baseline entry is stale: rule \"old-source-rule\", from \"old.go\"; remove this entry from the baseline.\n",
+		},
+		{
+			name: "violation precedes edge stale entry",
+			report: Report{
+				Violations: []engine.Violation{{
+					Rule:     "current",
+					Severity: "warn",
+					Kind:     engine.ViolationKindForbidden,
+					From:     engine.Source{Path: "current.go", Line: 4},
+				}},
+				Stale: []baseline.StaleError{{
+					Entry: baseline.Entry{
+						Rule: "old-edge-rule",
+						From: "old.go",
+						To:   &edgeTarget,
+					},
+				}},
+			},
+			want: "[warn] rule \"current\": current.go:4: forbidden source\n" +
+				"[error] baseline entry is stale: rule \"old-edge-rule\", from \"old.go\", to \"example.com/removed\"; remove this entry from the baseline.\n",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			var got bytes.Buffer
+			if err := WriteErrReport(&got, test.report); err != nil {
+				t.Fatalf("WriteErrReport() error = %v", err)
+			}
+			if got.String() != test.want {
+				t.Errorf("WriteErrReport() = %q, want %q", got.String(), test.want)
+			}
+		})
+	}
+}
+
 func TestWriteErrPropagatesWriterError(t *testing.T) {
 	t.Parallel()
 
 	wantErr := errors.New("write failed")
-	err := WriteErr(errFailingWriter{err: wantErr}, []engine.Violation{{
-		Rule:     "rule",
-		Severity: "error",
-		Kind:     engine.ViolationKindForbidden,
-		From:     engine.Source{Path: "source.go", Line: 1},
-	}})
-	if !errors.Is(err, wantErr) {
-		t.Errorf("WriteErr() error = %v, want %v", err, wantErr)
+	tests := []struct {
+		name  string
+		write func() error
+	}{
+		{
+			name: "violation",
+			write: func() error {
+				return WriteErr(errFailingWriter{err: wantErr}, []engine.Violation{{
+					Rule:     "rule",
+					Severity: "error",
+					Kind:     engine.ViolationKindForbidden,
+					From:     engine.Source{Path: "source.go", Line: 1},
+				}})
+			},
+		},
+		{
+			name: "stale baseline entry",
+			write: func() error {
+				return WriteErrReport(errFailingWriter{err: wantErr}, Report{
+					Stale: []baseline.StaleError{{
+						Entry: baseline.Entry{Rule: "removed", From: "old.go"},
+					}},
+				})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := test.write(); !errors.Is(err, wantErr) {
+				t.Errorf("write error = %v, want %v", err, wantErr)
+			}
+		})
 	}
 }
 

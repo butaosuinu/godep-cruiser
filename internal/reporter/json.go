@@ -14,9 +14,19 @@ const JSONSchemaVersion = 1
 
 // JSONReport is the stable, machine-readable representation of a report.
 type JSONReport struct {
-	SchemaVersion int             `json:"schemaVersion"`
-	Violations    []JSONViolation `json:"violations"`
-	Summary       Summary         `json:"summary"`
+	SchemaVersion        int                      `json:"schemaVersion"`
+	Violations           []JSONViolation          `json:"violations"`
+	StaleBaselineEntries []JSONStaleBaselineEntry `json:"staleBaselineEntries,omitempty"`
+	Summary              Summary                  `json:"summary"`
+}
+
+// JSONStaleBaselineEntry is the stable JSON representation of a stale
+// baseline entry.
+type JSONStaleBaselineEntry struct {
+	Rule    string  `json:"rule"`
+	From    string  `json:"from"`
+	To      *string `json:"to,omitempty"`
+	Message string  `json:"message"`
 }
 
 // JSONViolation is the stable JSON representation of an engine violation.
@@ -45,13 +55,27 @@ type JSONDependency struct {
 
 // WriteJSON writes violations and their summary as an indented JSON report.
 func WriteJSON(writer io.Writer, violations []engine.Violation) error {
+	return WriteJSONReport(writer, Report{Violations: violations})
+}
+
+// WriteJSONReport writes report as an indented JSON document.
+func WriteJSONReport(writer io.Writer, input Report) error {
 	report := JSONReport{
-		SchemaVersion: JSONSchemaVersion,
-		Violations:    make([]JSONViolation, len(violations)),
-		Summary:       Summarize(violations),
+		SchemaVersion:        JSONSchemaVersion,
+		Violations:           make([]JSONViolation, len(input.Violations)),
+		StaleBaselineEntries: make([]JSONStaleBaselineEntry, len(input.Stale)),
+		Summary:              SummarizeReport(input),
 	}
-	for index, violation := range violations {
+	for index, violation := range input.Violations {
 		report.Violations[index] = jsonViolation(violation)
+	}
+	for index, stale := range input.Stale {
+		report.StaleBaselineEntries[index] = JSONStaleBaselineEntry{
+			Rule:    stale.Entry.Rule,
+			From:    stale.Entry.From,
+			To:      stale.Entry.To,
+			Message: stale.Error(),
+		}
 	}
 
 	encoder := json.NewEncoder(writer)

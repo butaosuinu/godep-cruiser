@@ -1,0 +1,13 @@
+{
+  "forbidden": [
+    {
+      "name": "core-no-adapters",
+      "severity": "warn",
+      "from": {"path": ["^internal/core/"]},
+      "to": {
+        "path": ["^internal/adapters/"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ]
+}
