@@ -185,6 +185,8 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "duplicate top-level field", input: `{"allowed":[],"allowed":[]}`, wantPath: "$.allowed", wantText: `duplicate field "allowed"`},
 		{name: "duplicate forbidden rule name", input: `{"forbidden":[{"name":"dup","from":{},"to":{}},{"name":"dup","from":{},"to":{}}]}`, wantPath: "$.forbidden[1].name", wantText: `duplicate rule name "dup"`},
 		{name: "duplicate allowed rule name", input: `{"allowed":[{"name":"dup","from":{},"to":{}},{"name":"dup","from":{},"to":{}}]}`, wantPath: "$.allowed[1].name", wantText: `duplicate rule name "dup"`},
+		{name: "reserved forbidden rule name", input: `{"forbidden":[{"name":"not-in-allowed","from":{},"to":{}}]}`, wantPath: "$.forbidden[0].name", wantText: `rule name "not-in-allowed" is reserved`},
+		{name: "reserved allowed rule name", input: `{"allowed":[{"name":"not-in-allowed","from":{},"to":{}}]}`, wantPath: "$.allowed[0].name", wantText: `rule name "not-in-allowed" is reserved`},
 		{name: "forbidden must be array", input: `{"forbidden":null}`, wantPath: "$.forbidden", wantText: "must be an array"},
 		{name: "empty rule", input: `{"forbidden":[{}]}`, wantPath: "$.forbidden[0]", wantText: `missing required field "name"`},
 		{name: "empty name", input: validRule(`"name":""`), wantPath: "$.forbidden[0].name", wantText: "must not be empty"},

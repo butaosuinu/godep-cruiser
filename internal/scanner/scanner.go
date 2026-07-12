@@ -100,9 +100,10 @@ func parseFile(root, path string, resolver Resolver) (File, error) {
 	}
 
 	return File{
-		Path:    filepath.ToSlash(relativePath),
-		Package: parsed.Name.Name,
-		Imports: imports,
+		Path:        filepath.ToSlash(relativePath),
+		Package:     parsed.Name.Name,
+		PackageLine: fileSet.PositionFor(parsed.Name.Pos(), false).Line,
+		Imports:     imports,
 	}, nil
 }
 

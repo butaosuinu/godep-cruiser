@@ -103,8 +103,13 @@ v0.1 の設定形式は JSON のみとし、YAML は受理しない。
 各ルールは空でない `name` と `from` と `to` を必須とし、`{}` のような空ルールや metadata だけのルールを拒否する。
 同じ `forbidden` または `allowed` 配列内で rule name が重複する設定も拒否する。
 一方、`from: {}` と `to: {}` を明示したルールは全対象に一致する catch-all として受理する。
+forbidden ルールで `from.orphan` または `from.packageName` を指定し、かつ `to: {}` の場合だけ source-only として edge を評価せず、一致したファイルごとに 1 件の違反を生成する。
+to 条件を持つ forbidden ルール、allowed ルール、`from: {}` と `to: {}` の catch-all は edge rule として評価する。
 forbidden ルールの `severity` とトップレベルの `allowedSeverity` は、省略時に `warn` とする。
 allowed ルールに個別の `severity` は置けないため、どの allowed ルールにも一致しなかった依存には `allowedSeverity` を使う。
+allowed 未一致違反の rule 名は予約名 `not-in-allowed` に固定し、forbidden または allowed の rule name に同名を指定した設定は loader が拒否する。
+`severity: "ignore"` の forbidden ルールと `allowedSeverity: "ignore"` の allowed 検査はエンジンが評価を省略し、違反リストに含めない。
+これは baseline 照合後の報告上の ignore とは別の機構である。
 
 `path`、`pathNot`、`packageName` は Go の正規表現を文字列配列で指定する。
 同じフィールド内の配列要素は OR、異なるフィールド間は AND として評価する。

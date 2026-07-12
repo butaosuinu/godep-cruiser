@@ -42,5 +42,7 @@ type File struct {
 	// Path is slash-separated and relative to the explicit scan root.
 	Path    string
 	Package string
-	Imports []Import
+	// PackageLine is the one-based line containing the package clause.
+	PackageLine int
+	Imports     []Import
 }

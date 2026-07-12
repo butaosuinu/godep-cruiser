@@ -15,7 +15,7 @@
   ],
   "violations": [
     {
-      "rule": "dependencies-must-be-classified",
+      "rule": "not-in-allowed",
       "severity": "error",
       "from": {
         "path": "internal/app/app.go",
