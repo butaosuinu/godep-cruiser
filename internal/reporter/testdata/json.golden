@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "violations": [
+    {
+      "rule": "no-core-import",
+      "comment": "move through <adapter> & \"gateway\"",
+      "severity": "error",
+      "kind": "forbidden",
+      "from": {
+        "path": "internal/app/app.go",
+        "line": 12,
+        "packageName": "app"
+      },
+      "to": {
+        "path": "internal/core",
+        "importPath": "example.com/project/internal/core",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "main-placement",
+      "comment": "move package main under cmd",
+      "severity": "warn",
+      "kind": "forbidden",
+      "from": {
+        "path": "internal/worker/main.go",
+        "line": 7,
+        "packageName": "main"
+      },
+      "to": null
+    }
+  ],
+  "summary": {
+    "total": 2,
+    "error": 1,
+    "warn": 1,
+    "info": 0,
+    "ignore": 0
+  }
+}
