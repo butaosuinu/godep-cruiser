@@ -120,6 +120,9 @@ func decodeGolden(filename string) (Case, error) {
 	if err != nil {
 		return Case{}, fmt.Errorf("read %s: %w", goldenFilename, err)
 	}
+	if err := rejectDuplicateJSONKeys(data); err != nil {
+		return Case{}, fmt.Errorf("decode %s: %w", goldenFilename, err)
+	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -133,6 +136,76 @@ func decodeGolden(filename string) (Case, error) {
 	return fixture, nil
 }
 
+func rejectDuplicateJSONKeys(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := scanJSONValue(decoder, "$"); err != nil {
+		return err
+	}
+	_, err := decoder.Token()
+	if err == nil {
+		return errors.New("trailing JSON value")
+	}
+	if !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
+func scanJSONValue(decoder *json.Decoder, location string) error {
+	value, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := value.(json.Delim)
+	if !ok {
+		return nil
+	}
+
+	switch delimiter {
+	case '{':
+		keys := make(map[string]struct{})
+		for decoder.More() {
+			value, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := value.(string)
+			if !ok {
+				return fmt.Errorf("object key at %s is not a string", location)
+			}
+			if _, duplicate := keys[key]; duplicate {
+				return fmt.Errorf("duplicate key %q at %s", key, location)
+			}
+			keys[key] = struct{}{}
+			if err := scanJSONValue(decoder, location+"."+key); err != nil {
+				return err
+			}
+		}
+		return consumeJSONDelimiter(decoder, '}')
+	case '[':
+		for index := 0; decoder.More(); index++ {
+			if err := scanJSONValue(decoder, fmt.Sprintf("%s[%d]", location, index)); err != nil {
+				return err
+			}
+		}
+		return consumeJSONDelimiter(decoder, ']')
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q at %s", delimiter, location)
+	}
+}
+
+func consumeJSONDelimiter(decoder *json.Decoder, want json.Delim) error {
+	value, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if value != want {
+		return fmt.Errorf("JSON delimiter = %v, want %v", value, want)
+	}
+	return nil
+}
+
 func validateCase(fixture Case) error {
 	if !validCaseName(fixture.Name) {
 		return errors.New("name must follow \"<rule family>: <expected behavior>\"")
@@ -140,7 +213,8 @@ func validateCase(fixture Case) error {
 	if len(fixture.Violations) == 0 {
 		return errors.New("violations must not be empty")
 	}
-	if err := validatePositiveControls(fixture); err != nil {
+	controlIdentities, err := validatePositiveControls(fixture)
+	if err != nil {
 		return err
 	}
 
@@ -150,37 +224,42 @@ func validateCase(fixture Case) error {
 		if err := validateViolation(fixture.ModuleDir, violation); err != nil {
 			return fmt.Errorf("violations[%d]: %w", i, err)
 		}
-		key := violationKey(violation)
-		if _, ok := seen[key]; ok {
-			return fmt.Errorf("violations[%d] duplicates %q", i, key)
+		identity := violationIdentity(violation)
+		if _, ok := controlIdentities[identity]; ok {
+			return fmt.Errorf("violations[%d] contradicts positiveControls identity %q", i, identity)
 		}
+		if _, ok := seen[identity]; ok {
+			return fmt.Errorf("violations[%d] duplicates identity %q", i, identity)
+		}
+		key := violationSortKey(violation)
 		if i > 0 && key < previousKey {
 			return fmt.Errorf("violations must be sorted; %q appears after %q", key, previousKey)
 		}
-		seen[key] = struct{}{}
+		seen[identity] = struct{}{}
 		previousKey = key
 	}
 	return nil
 }
 
-func validatePositiveControls(fixture Case) error {
+func validatePositiveControls(fixture Case) (map[string]struct{}, error) {
 	seen := make(map[string]struct{}, len(fixture.PositiveControls))
 	previousKey := ""
 	for i, control := range fixture.PositiveControls {
 		if err := validatePositiveControl(fixture.ModuleDir, control); err != nil {
-			return fmt.Errorf("positiveControls[%d]: %w", i, err)
+			return nil, fmt.Errorf("positiveControls[%d]: %w", i, err)
 		}
-		key := positiveControlKey(control)
-		if _, ok := seen[key]; ok {
-			return fmt.Errorf("positiveControls[%d] duplicates %q", i, key)
+		identity := positiveControlIdentity(control)
+		if _, ok := seen[identity]; ok {
+			return nil, fmt.Errorf("positiveControls[%d] duplicates identity %q", i, identity)
 		}
+		key := positiveControlSortKey(control)
 		if i > 0 && key < previousKey {
-			return fmt.Errorf("positiveControls must be sorted; %q appears after %q", key, previousKey)
+			return nil, fmt.Errorf("positiveControls must be sorted; %q appears after %q", key, previousKey)
 		}
-		seen[key] = struct{}{}
+		seen[identity] = struct{}{}
 		previousKey = key
 	}
-	return nil
+	return seen, nil
 }
 
 func validCaseName(name string) bool {
@@ -277,7 +356,7 @@ func validDependencyType(dependencyType string) bool {
 	}
 }
 
-func violationKey(violation ExpectedViolation) string {
+func violationSortKey(violation ExpectedViolation) string {
 	toPath := ""
 	dependencyType := ""
 	if violation.To != nil {
@@ -294,7 +373,7 @@ func violationKey(violation ExpectedViolation) string {
 	}, "\x00")
 }
 
-func positiveControlKey(control PositiveControl) string {
+func positiveControlSortKey(control PositiveControl) string {
 	toPath := ""
 	dependencyType := ""
 	if control.To != nil {
@@ -308,5 +387,32 @@ func positiveControlKey(control PositiveControl) string {
 		toPath,
 		dependencyType,
 		control.PackageName,
+	}, "\x00")
+}
+
+func violationIdentity(violation ExpectedViolation) string {
+	return factIdentity(violation.Rule, violation.From, violation.To)
+}
+
+func positiveControlIdentity(control PositiveControl) string {
+	return factIdentity(control.Rule, control.From, control.To)
+}
+
+func factIdentity(rule string, from Location, to *Dependency) string {
+	kind := "source"
+	toPath := ""
+	dependencyType := ""
+	if to != nil {
+		kind = "edge"
+		toPath = to.Path
+		dependencyType = to.DependencyType
+	}
+	return strings.Join([]string{
+		rule,
+		kind,
+		from.Path,
+		fmt.Sprintf("%09d", from.Line),
+		toPath,
+		dependencyType,
 	}, "\x00")
 }

@@ -535,6 +535,147 @@ func TestValidatePositiveControl(t *testing.T) {
 	}
 }
 
+func TestDecodeGoldenRejectsDuplicateKeys(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		contents  string
+		wantError string
+	}{
+		{
+			name:      "top-level key",
+			contents:  `{"name":"rule: behavior","violations":[],"violations":[]}`,
+			wantError: `duplicate key "violations" at $`,
+		},
+		{
+			name:      "nested dependency key",
+			contents:  `{"name":"rule: behavior","violations":[{"rule":"rule","severity":"error","from":{"path":"source.go","line":1},"to":{"path":"fmt","path":"os","dependencyType":"stdlib"}}]}`,
+			wantError: `duplicate key "path" at $.violations[0].to`,
+		},
+		{
+			name:      "escaped equivalent key",
+			contents:  `{"name":"rule: behavior","\u006eame":"rule: replaced","violations":[]}`,
+			wantError: `duplicate key "name" at $`,
+		},
+		{
+			name:     "same key in separate objects",
+			contents: `{"name":"rule: behavior","positiveControls":[{"rule":"one","from":{"path":"one.go","line":1},"packageName":"one"},{"rule":"two","from":{"path":"two.go","line":1},"packageName":"two"}],"violations":[]}`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			filename := filepath.Join(t.TempDir(), goldenFilename)
+			if err := os.WriteFile(filename, []byte(test.contents), 0o600); err != nil {
+				t.Fatalf("write %s: %v", goldenFilename, err)
+			}
+			_, err := decodeGolden(filename)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("decodeGolden() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("decodeGolden() = %v, want error containing %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func TestValidateCaseFactIdentities(t *testing.T) {
+	t.Parallel()
+
+	moduleDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(moduleDir, "source.go"), []byte("package fixture\n"), 0o600); err != nil {
+		t.Fatalf("write source.go: %v", err)
+	}
+	location := Location{Path: "source.go", Line: 1}
+	edge := &Dependency{Path: "fmt", DependencyType: "stdlib"}
+	tests := []struct {
+		name      string
+		fixture   Case
+		wantError string
+	}{
+		{
+			name: "violation identity ignores severity",
+			fixture: Case{
+				Name:      "rule: duplicate severity",
+				ModuleDir: moduleDir,
+				Violations: []ExpectedViolation{
+					{Rule: "rule", Severity: "error", From: location, To: edge},
+					{Rule: "rule", Severity: "warn", From: location, To: edge},
+				},
+			},
+			wantError: "duplicates identity",
+		},
+		{
+			name: "edge cannot be positive and violated",
+			fixture: Case{
+				Name:             "rule: contradictory edge",
+				ModuleDir:        moduleDir,
+				PositiveControls: []PositiveControl{{Rule: "rule", From: location, To: edge}},
+				Violations:       []ExpectedViolation{{Rule: "rule", Severity: "error", From: location, To: edge}},
+			},
+			wantError: "contradicts positiveControls",
+		},
+		{
+			name: "source cannot be positive and violated",
+			fixture: Case{
+				Name:      "rule: contradictory source",
+				ModuleDir: moduleDir,
+				PositiveControls: []PositiveControl{
+					{Rule: "rule", From: location, PackageName: "fixture"},
+				},
+				Violations: []ExpectedViolation{{Rule: "rule", Severity: "error", From: location}},
+			},
+			wantError: "contradicts positiveControls",
+		},
+		{
+			name: "positive source identity ignores package name",
+			fixture: Case{
+				Name:      "rule: duplicate positive source",
+				ModuleDir: moduleDir,
+				PositiveControls: []PositiveControl{
+					{Rule: "rule", From: location, PackageName: "fixture"},
+					{Rule: "rule", From: location, PackageName: "other"},
+				},
+				Violations: []ExpectedViolation{{Rule: "other-rule", Severity: "error", From: location}},
+			},
+			wantError: "duplicates identity",
+		},
+		{
+			name: "different rules remain distinct",
+			fixture: Case{
+				Name:             "rule: distinct facts",
+				ModuleDir:        moduleDir,
+				PositiveControls: []PositiveControl{{Rule: "allowed-rule", From: location, To: edge}},
+				Violations:       []ExpectedViolation{{Rule: "forbidden-rule", Severity: "error", From: location, To: edge}},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateCase(test.fixture)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("validateCase() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("validateCase() = %v, want error containing %q", err, test.wantError)
+			}
+		})
+	}
+}
+
 func vetFixtureModule(t *testing.T, moduleDir string) {
 	t.Helper()
 

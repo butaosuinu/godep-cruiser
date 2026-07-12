@@ -30,15 +30,17 @@ the resolver's normalized path when it is non-empty and otherwise retains the
 source import path. In particular, scanner keeps the cgo pseudo-import as raw
 path `C`, empty resolved path, and type `unresolved`; the golden target is
 therefore `C`. Violation arrays are sorted by rule, severity, from path, line,
-to path, and dependency type. The loader rejects unknown fields, duplicates,
-invalid enum values, and stale source locations.
+to path, and dependency type. The loader rejects unknown fields, duplicate JSON
+object keys, invalid enum values, stale source locations, and repeated
+violation identities even when their severities differ.
 
 Optional `positiveControls` pin source facts that must stay in a fixture but
 must not appear in engine violation output. Each control has `rule` and `from`,
 plus exactly one of an import target in `to` or a source `packageName`. Controls
 are sorted and checked as strictly as violations. They keep allowed imports,
 exceptions, and allowed package roots from disappearing while a
-violation-only comparison still passes.
+violation-only comparison still passes. A control and violation may not claim
+the same rule/source/target identity.
 
 Baseline inputs and their stale-entry diagnostics are separate from this live
 violation golden. Issue #6 owns those artifacts and the stale corpus case, so
