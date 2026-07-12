@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -57,6 +58,9 @@ func TestViolationCorpus(t *testing.T) {
 			}
 			assertGoldenLocations(t, fixture, files)
 			assertPositiveControlLocations(t, fixture, files)
+			if err := validateSourceOnlyViolationCompleteness(fixture, files); err != nil {
+				t.Error(err)
+			}
 			vetFixtureModule(t, fixture.ModuleDir)
 		})
 	}
@@ -186,20 +190,121 @@ func validateGoldenLocation(violation ExpectedViolation, files map[string]parsed
 }
 
 func validateOrphanLocation(sourcePath string, file parsedFile, files map[string]parsedFile) error {
+	if isOrphanLocation(sourcePath, file, files) {
+		return nil
+	}
 	if len(file.imports) != 0 {
 		return fmt.Errorf("source-only golden no-orphans file %s has %d outgoing imports", sourcePath, len(file.imports))
 	}
+	return fmt.Errorf("source-only golden no-orphans file %s has an incoming import from %s", sourcePath, incomingImporter(sourcePath, files))
+}
 
+func isOrphanLocation(sourcePath string, file parsedFile, files map[string]parsedFile) bool {
+	return len(file.imports) == 0 && incomingImporter(sourcePath, files) == ""
+}
+
+func incomingImporter(sourcePath string, files map[string]parsedFile) string {
 	packagePath := path.Dir(sourcePath)
-	for importerPath, importer := range files {
+	for _, importerPath := range sortedFilePaths(files) {
+		importer := files[importerPath]
 		incoming := slices.ContainsFunc(importer.imports, func(found parsedImport) bool {
 			return found.dependencyType == string(scanner.DependencyTypeLocal) && found.path == packagePath
 		})
 		if incoming {
-			return fmt.Errorf("source-only golden no-orphans file %s has an incoming import from %s", sourcePath, importerPath)
+			return importerPath
 		}
 	}
-	return nil
+	return ""
+}
+
+func validateSourceOnlyViolationCompleteness(fixture Case, files map[string]parsedFile) error {
+	var rule string
+	var matches func(string, parsedFile, map[string]parsedFile) bool
+	switch fixture.ID {
+	case "orphan-file":
+		rule = "no-orphans"
+		matches = isOrphanLocation
+	case "package-main-placement":
+		rule = "package-main-placement"
+		matches = isMisplacedPackageMain
+	default:
+		return nil
+	}
+
+	actual := collectSourceOnlyLocations(files, matches)
+	want := goldenSourceOnlyLocations(fixture.Violations, rule)
+	if slices.Equal(actual, want) {
+		return nil
+	}
+	return fmt.Errorf(
+		"fixture %q actual source-only %s locations = %q, want golden locations %q",
+		fixture.ID,
+		rule,
+		formatLocations(actual),
+		formatLocations(want),
+	)
+}
+
+func isMisplacedPackageMain(sourcePath string, file parsedFile, _ map[string]parsedFile) bool {
+	return file.packageName == "main" &&
+		!strings.HasPrefix(sourcePath, "cmd/") &&
+		!strings.HasPrefix(sourcePath, "tools/")
+}
+
+func collectSourceOnlyLocations(
+	files map[string]parsedFile,
+	matches func(string, parsedFile, map[string]parsedFile) bool,
+) []Location {
+	locations := make([]Location, 0)
+	for _, sourcePath := range sortedFilePaths(files) {
+		file := files[sourcePath]
+		if matches(sourcePath, file, files) {
+			locations = append(locations, Location{Path: sourcePath, Line: file.packageLine})
+		}
+	}
+	return locations
+}
+
+func goldenSourceOnlyLocations(violations []ExpectedViolation, rule string) []Location {
+	locations := make([]Location, 0)
+	for _, violation := range violations {
+		if violation.Rule == rule && violation.To == nil {
+			locations = append(locations, violation.From)
+		}
+	}
+	slices.SortFunc(locations, compareLocations)
+	return locations
+}
+
+func compareLocations(a, b Location) int {
+	if byPath := strings.Compare(a.Path, b.Path); byPath != 0 {
+		return byPath
+	}
+	switch {
+	case a.Line < b.Line:
+		return -1
+	case a.Line > b.Line:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func sortedFilePaths(files map[string]parsedFile) []string {
+	paths := make([]string, 0, len(files))
+	for sourcePath := range files {
+		paths = append(paths, sourcePath)
+	}
+	slices.Sort(paths)
+	return paths
+}
+
+func formatLocations(locations []Location) []string {
+	formatted := make([]string, len(locations))
+	for i, location := range locations {
+		formatted[i] = fmt.Sprintf("%s:%d", location.Path, location.Line)
+	}
+	return formatted
 }
 
 func assertPositiveControlLocations(t *testing.T, fixture Case, files map[string]parsedFile) {
@@ -396,6 +501,111 @@ func TestValidateGoldenLocation(t *testing.T) {
 	}
 }
 
+func TestValidateSourceOnlyViolationCompleteness(t *testing.T) {
+	t.Parallel()
+
+	orphanFixture := Case{
+		ID: "orphan-file",
+		Violations: []ExpectedViolation{
+			{
+				Rule:     "no-orphans",
+				Severity: "error",
+				From:     Location{Path: "internal/lonely/lonely.go", Line: 1},
+			},
+		},
+	}
+	orphanFiles := map[string]parsedFile{
+		"cmd/app/main.go": {
+			packageName: "main",
+			packageLine: 1,
+			imports: []parsedImport{
+				{path: "internal/connected", dependencyType: "local", line: 3},
+			},
+		},
+		"internal/connected/connected.go": {packageName: "connected", packageLine: 1},
+		"internal/lonely/lonely.go":       {packageName: "lonely", packageLine: 1},
+	}
+	packageMainFixture := Case{
+		ID: "package-main-placement",
+		Violations: []ExpectedViolation{
+			{
+				Rule:     "package-main-placement",
+				Severity: "error",
+				From:     Location{Path: "internal/worker/main.go", Line: 1},
+			},
+		},
+	}
+	packageMainFiles := map[string]parsedFile{
+		"cmd/app/main.go":          {packageName: "main", packageLine: 1},
+		"internal/library/file.go": {packageName: "library", packageLine: 1},
+		"internal/worker/main.go":  {packageName: "main", packageLine: 1},
+		"tools/generate/main.go":   {packageName: "main", packageLine: 1},
+	}
+
+	tests := []struct {
+		name      string
+		fixture   Case
+		files     map[string]parsedFile
+		wantError string
+	}{
+		{
+			name:    "orphan actual set matches golden",
+			fixture: orphanFixture,
+			files:   orphanFiles,
+		},
+		{
+			name:    "orphan missing from golden is rejected deterministically",
+			fixture: orphanFixture,
+			files: mergeParsedFiles(orphanFiles, map[string]parsedFile{
+				"internal/also/also.go": {packageName: "also", packageLine: 1},
+			}),
+			wantError: `fixture "orphan-file" actual source-only no-orphans locations = ["internal/also/also.go:1" "internal/lonely/lonely.go:1"], want golden locations ["internal/lonely/lonely.go:1"]`,
+		},
+		{
+			name:    "misplaced package main actual set matches golden",
+			fixture: packageMainFixture,
+			files:   packageMainFiles,
+		},
+		{
+			name:    "misplaced package main missing from golden is rejected deterministically",
+			fixture: packageMainFixture,
+			files: mergeParsedFiles(packageMainFiles, map[string]parsedFile{
+				"cmdtool/main.go": {packageName: "main", packageLine: 1},
+			}),
+			wantError: `fixture "package-main-placement" actual source-only package-main-placement locations = ["cmdtool/main.go:1" "internal/worker/main.go:1"], want golden locations ["internal/worker/main.go:1"]`,
+		},
+		{
+			name:    "unrelated fixture has no completeness predicate",
+			fixture: Case{ID: "layer-direction"},
+			files:   map[string]parsedFile{"lonely.go": {packageName: "main", packageLine: 1}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateSourceOnlyViolationCompleteness(test.fixture, test.files)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("validateSourceOnlyViolationCompleteness() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != test.wantError {
+				t.Fatalf("validateSourceOnlyViolationCompleteness() = %v, want %q", err, test.wantError)
+			}
+		})
+	}
+}
+
+func mergeParsedFiles(base, extra map[string]parsedFile) map[string]parsedFile {
+	merged := make(map[string]parsedFile, len(base)+len(extra))
+	maps.Copy(merged, base)
+	maps.Copy(merged, extra)
+	return merged
+}
+
 func TestValidatePositiveControlLocation(t *testing.T) {
 	t.Parallel()
 
@@ -471,6 +681,67 @@ func TestValidatePositiveControlLocation(t *testing.T) {
 	}
 }
 
+func TestValidateViolationRuleShape(t *testing.T) {
+	t.Parallel()
+
+	moduleDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(moduleDir, "source.go"), []byte("package fixture\n"), 0o600); err != nil {
+		t.Fatalf("write source.go: %v", err)
+	}
+	location := Location{Path: "source.go", Line: 1}
+	edge := &Dependency{Path: "fmt", DependencyType: "stdlib"}
+	tests := []struct {
+		name      string
+		violation ExpectedViolation
+		wantError string
+	}{
+		{
+			name:      "edge rule keeps import target",
+			violation: ExpectedViolation{Rule: "rule", Severity: "error", From: location, To: edge},
+		},
+		{
+			name:      "edge rule rejects source-only shape",
+			violation: ExpectedViolation{Rule: "rule", Severity: "error", From: location},
+			wantError: `edge rule "rule" must set to`,
+		},
+		{
+			name:      "package main rule stays source-only",
+			violation: ExpectedViolation{Rule: "package-main-placement", Severity: "error", From: location},
+		},
+		{
+			name:      "package main rule rejects import target",
+			violation: ExpectedViolation{Rule: "package-main-placement", Severity: "error", From: location, To: edge},
+			wantError: `source-only rule "package-main-placement" must not set to`,
+		},
+		{
+			name:      "orphan rule stays source-only",
+			violation: ExpectedViolation{Rule: "no-orphans", Severity: "error", From: location},
+		},
+		{
+			name:      "orphan rule rejects import target",
+			violation: ExpectedViolation{Rule: "no-orphans", Severity: "error", From: location, To: edge},
+			wantError: `source-only rule "no-orphans" must not set to`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validateViolation(moduleDir, test.violation)
+			if test.wantError == "" {
+				if err != nil {
+					t.Fatalf("validateViolation() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.wantError) {
+				t.Fatalf("validateViolation() = %v, want error containing %q", err, test.wantError)
+			}
+		})
+	}
+}
+
 func TestValidatePositiveControl(t *testing.T) {
 	t.Parallel()
 
@@ -495,10 +766,36 @@ func TestValidatePositiveControl(t *testing.T) {
 		{
 			name: "package control",
 			control: PositiveControl{
+				Rule:        "package-main-placement",
+				From:        location,
+				PackageName: "fixture",
+			},
+		},
+		{
+			name: "orphan edge control",
+			control: PositiveControl{
+				Rule: "no-orphans",
+				From: location,
+				To:   &Dependency{Path: "internal/connected", DependencyType: "local"},
+			},
+		},
+		{
+			name: "edge rule rejects package control",
+			control: PositiveControl{
 				Rule:        "rule",
 				From:        location,
 				PackageName: "fixture",
 			},
+			wantError: `edge rule "rule" positive control must set to, not packageName`,
+		},
+		{
+			name: "package rule rejects import control",
+			control: PositiveControl{
+				Rule: "package-main-placement",
+				From: location,
+				To:   &Dependency{Path: "fmt", DependencyType: "stdlib"},
+			},
+			wantError: "package-main-placement positive control must set packageName, not to",
 		},
 		{
 			name:      "missing control shape",
@@ -628,9 +925,9 @@ func TestValidateCaseFactIdentities(t *testing.T) {
 				Name:      "rule: contradictory source",
 				ModuleDir: moduleDir,
 				PositiveControls: []PositiveControl{
-					{Rule: "rule", From: location, PackageName: "fixture"},
+					{Rule: "package-main-placement", From: location, PackageName: "fixture"},
 				},
-				Violations: []ExpectedViolation{{Rule: "rule", Severity: "error", From: location}},
+				Violations: []ExpectedViolation{{Rule: "package-main-placement", Severity: "error", From: location}},
 			},
 			wantError: "contradicts positiveControls",
 		},
@@ -640,10 +937,10 @@ func TestValidateCaseFactIdentities(t *testing.T) {
 				Name:      "rule: duplicate positive source",
 				ModuleDir: moduleDir,
 				PositiveControls: []PositiveControl{
-					{Rule: "rule", From: location, PackageName: "fixture"},
-					{Rule: "rule", From: location, PackageName: "other"},
+					{Rule: "package-main-placement", From: location, PackageName: "fixture"},
+					{Rule: "package-main-placement", From: location, PackageName: "other"},
 				},
-				Violations: []ExpectedViolation{{Rule: "other-rule", Severity: "error", From: location}},
+				Violations: []ExpectedViolation{{Rule: "other-rule", Severity: "error", From: location, To: edge}},
 			},
 			wantError: "duplicates identity",
 		},

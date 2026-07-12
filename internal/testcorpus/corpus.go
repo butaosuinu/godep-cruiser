@@ -277,10 +277,18 @@ func validateViolation(moduleDir string, violation ExpectedViolation) error {
 	if err := validateLocation(moduleDir, violation.From); err != nil {
 		return err
 	}
-	if violation.To == nil {
+	switch violation.Rule {
+	case "package-main-placement", "no-orphans":
+		if violation.To != nil {
+			return fmt.Errorf("source-only rule %q must not set to", violation.Rule)
+		}
 		return nil
+	default:
+		if violation.To == nil {
+			return fmt.Errorf("edge rule %q must set to", violation.Rule)
+		}
+		return validateDependency(*violation.To)
 	}
-	return validateDependency(*violation.To)
 }
 
 func validatePositiveControl(moduleDir string, control PositiveControl) error {
@@ -295,13 +303,19 @@ func validatePositiveControl(moduleDir string, control PositiveControl) error {
 	if hasDependency == hasPackageName {
 		return errors.New("exactly one of to or packageName must be set")
 	}
-	if hasDependency {
-		return validateDependency(*control.To)
+	if control.Rule == "package-main-placement" {
+		if !hasPackageName {
+			return errors.New("package-main-placement positive control must set packageName, not to")
+		}
+		if !token.IsIdentifier(control.PackageName) {
+			return fmt.Errorf("packageName %q is not a Go identifier", control.PackageName)
+		}
+		return nil
 	}
-	if !token.IsIdentifier(control.PackageName) {
-		return fmt.Errorf("packageName %q is not a Go identifier", control.PackageName)
+	if !hasDependency {
+		return fmt.Errorf("edge rule %q positive control must set to, not packageName", control.Rule)
 	}
-	return nil
+	return validateDependency(*control.To)
 }
 
 func validateLocation(moduleDir string, location Location) error {

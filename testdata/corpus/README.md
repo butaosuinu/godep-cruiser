@@ -22,8 +22,9 @@ Each expected violation contains:
 - `from.path`, relative to the fixture module with `/` separators
 - `from.line`, the import line for edge violations or package line for
   source-only violations
-- optional `to.path` and `to.dependencyType`; omit `to` for source-only rules
-  such as orphan and package-name checks
+- optional `to.path` and `to.dependencyType`; `package-main-placement` and
+  `no-orphans` are source-only rules and must omit `to`, while every other
+  corpus rule is edge-only and must include it
 
 Dependency classification is delegated to `internal/scanner`. `to.path` uses
 the resolver's normalized path when it is non-empty and otherwise retains the
@@ -35,12 +36,18 @@ object keys, invalid enum values, stale source locations, and repeated
 violation identities even when their severities differ.
 
 Optional `positiveControls` pin source facts that must stay in a fixture but
-must not appear in engine violation output. Each control has `rule` and `from`,
-plus exactly one of an import target in `to` or a source `packageName`. Controls
-are sorted and checked as strictly as violations. They keep allowed imports,
-exceptions, and allowed package roots from disappearing while a
-violation-only comparison still passes. A control and violation may not claim
-the same rule/source/target identity.
+must not appear in engine violation output. Each control has `rule` and `from`.
+Only `package-main-placement` controls use a source `packageName` and omit
+`to`; every other rule, including `no-orphans`, uses an import target in `to`
+and omits `packageName`. Controls are sorted and checked as strictly as
+violations. They keep allowed imports, exceptions, and allowed package roots
+from disappearing while a violation-only comparison still passes. A control
+and violation may not claim the same rule/source/target identity.
+
+The harness also derives all disconnected files and all `package main` files
+outside `cmd/` and `tools/` from the parsed fixture. It rejects any such
+source-only violation that is not listed in the golden, so adding another bad
+file cannot silently weaken these cases.
 
 Baseline inputs and their stale-entry diagnostics are separate from this live
 violation golden. Issue #6 owns those artifacts and the stale corpus case, so
