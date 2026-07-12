@@ -1,0 +1,5 @@
+[error] rule "core-purity": internal/core/service.go:12 -> database/sql (stdlib): forbidden dependency
+  fix: move the import behind an interface
+[warn] rule "not-in-allowed": internal/app/app.go:8 -> internal/misc (local): dependency matches no allowed rule
+[error] rule "main-placement": internal/worker/main.go:1: forbidden source
+  fix: move package main under cmd/ or tools/
