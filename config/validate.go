@@ -13,6 +13,8 @@ type configValidator struct {
 	data   []byte
 }
 
+const reservedAllowedViolationRuleName = "not-in-allowed"
+
 func (validator configValidator) validate(root *jsonNode) error {
 	fields, err := validator.object(root, "$", "forbidden", "allowed", "allowedSeverity")
 	if err != nil {
@@ -82,6 +84,13 @@ func (validator configValidator) rule(node *jsonNode, path string, forbidden boo
 	}
 	if validationErr := validator.nonEmptyString(name.value, fieldPath(path, "name")); validationErr != nil {
 		return validationErr
+	}
+	if name.value.text == reservedAllowedViolationRuleName {
+		return validator.at(
+			name.value,
+			fieldPath(path, "name"),
+			fmt.Errorf("rule name %q is reserved", name.value.text),
+		)
 	}
 	from, err := validator.required(fields, node, path, "from")
 	if err != nil {

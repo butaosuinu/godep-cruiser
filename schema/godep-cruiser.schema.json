@@ -45,6 +45,14 @@
         "unresolved"
       ]
     },
+    "ruleName": {
+      "type": "string",
+      "minLength": 1,
+      "description": "User-defined rule name. The synthesized allowed-violation name not-in-allowed is reserved.",
+      "not": {
+        "const": "not-in-allowed"
+      }
+    },
     "regexArray": {
       "type": "array",
       "minItems": 1,
@@ -112,8 +120,7 @@
       ],
       "properties": {
         "name": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/ruleName"
         },
         "comment": {
           "type": "string"
@@ -140,8 +147,7 @@
       ],
       "properties": {
         "name": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/ruleName"
         },
         "comment": {
           "type": "string"

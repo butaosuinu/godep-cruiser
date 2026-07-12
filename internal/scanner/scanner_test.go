@@ -47,15 +47,17 @@ func TestScanRecordsEveryGoFile(t *testing.T) {
 	}
 
 	tests := []struct {
-		name        string
-		path        string
-		wantPackage string
-		wantImports []Import
+		name            string
+		path            string
+		wantPackage     string
+		wantPackageLine int
+		wantImports     []Import
 	}{
 		{
-			name:        "four dependency types retain import metadata",
-			path:        "imports.go",
-			wantPackage: "fixture",
+			name:            "four dependency types retain import metadata",
+			path:            "imports.go",
+			wantPackage:     "fixture",
+			wantPackageLine: 1,
 			wantImports: []Import{
 				{Path: "C", Type: DependencyTypeUnresolved, Line: 4},
 				{
@@ -74,33 +76,37 @@ func TestScanRecordsEveryGoFile(t *testing.T) {
 			},
 		},
 		{
-			name:        "external test package is retained",
-			path:        "feature_test.go",
-			wantPackage: "fixture_test",
+			name:            "external test package is retained",
+			path:            "feature_test.go",
+			wantPackage:     "fixture_test",
+			wantPackageLine: 1,
 			wantImports: []Import{
 				{Path: "testing", ResolvedPath: "testing", Type: DependencyTypeStdlib, Line: 3},
 			},
 		},
 		{
-			name:        "linux suffix is retained",
-			path:        "os_linux.go",
-			wantPackage: "fixture",
+			name:            "linux suffix is retained",
+			path:            "os_linux.go",
+			wantPackage:     "fixture",
+			wantPackageLine: 1,
 			wantImports: []Import{
 				{Path: "os", ResolvedPath: "os", Type: DependencyTypeStdlib, Line: 3},
 			},
 		},
 		{
-			name:        "windows suffix is retained",
-			path:        "os_windows.go",
-			wantPackage: "fixture",
+			name:            "windows suffix is retained",
+			path:            "os_windows.go",
+			wantPackage:     "fixture",
+			wantPackageLine: 1,
 			wantImports: []Import{
 				{Path: "syscall", ResolvedPath: "syscall", Type: DependencyTypeStdlib, Line: 3},
 			},
 		},
 		{
-			name:        "build tagged file is retained",
-			path:        "tagged.go",
-			wantPackage: "fixture",
+			name:            "build tagged file retains package position",
+			path:            "tagged.go",
+			wantPackage:     "fixture",
+			wantPackageLine: 3,
 			wantImports: []Import{
 				{Path: "runtime", ResolvedPath: "runtime", Type: DependencyTypeStdlib, Line: 5},
 			},
@@ -117,6 +123,9 @@ func TestScanRecordsEveryGoFile(t *testing.T) {
 			}
 			if file.Package != tt.wantPackage {
 				t.Errorf("file %q package = %q, want %q", tt.path, file.Package, tt.wantPackage)
+			}
+			if file.PackageLine != tt.wantPackageLine {
+				t.Errorf("file %q package line = %d, want %d", tt.path, file.PackageLine, tt.wantPackageLine)
 			}
 			if !reflect.DeepEqual(file.Imports, tt.wantImports) {
 				t.Errorf("file %q imports = %#v, want %#v", tt.path, file.Imports, tt.wantImports)

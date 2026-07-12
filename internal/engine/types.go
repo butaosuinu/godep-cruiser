@@ -1,0 +1,48 @@
+package engine
+
+import (
+	"github.com/butaosuinu/godep-cruiser/config"
+	"github.com/butaosuinu/godep-cruiser/internal/scanner"
+)
+
+// NotInAllowedRuleName is the reserved name for dependencies that match no
+// allowed rule.
+const NotInAllowedRuleName = "not-in-allowed"
+
+// ViolationKind identifies why the engine reported a violation.
+type ViolationKind string
+
+const (
+	// ViolationKindForbidden identifies a matching forbidden rule.
+	ViolationKindForbidden ViolationKind = "forbidden"
+	// ViolationKindNotAllowed identifies a dependency outside the allowed set.
+	ViolationKindNotAllowed ViolationKind = NotInAllowedRuleName
+)
+
+// Source identifies the importing file and source position of a violation.
+type Source struct {
+	Path        string
+	Line        int
+	PackageName string
+}
+
+// Dependency identifies the imported target of an edge violation.
+type Dependency struct {
+	// Path is the normalized resolver path, or ImportPath when resolution has
+	// no path.
+	Path string
+	// ImportPath is the path exactly as declared in the source file.
+	ImportPath string
+	Type       scanner.DependencyType
+}
+
+// Violation describes one rule violation without discarding information used
+// by reporters or baseline matching. To is nil for source-only violations.
+type Violation struct {
+	Rule     string
+	Comment  string
+	Severity config.Severity
+	Kind     ViolationKind
+	From     Source
+	To       *Dependency
+}

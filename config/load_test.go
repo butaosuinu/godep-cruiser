@@ -185,6 +185,8 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "duplicate top-level field", input: `{"allowed":[],"allowed":[]}`, wantPath: "$.allowed", wantText: `duplicate field "allowed"`},
 		{name: "duplicate forbidden rule name", input: `{"forbidden":[{"name":"dup","from":{},"to":{}},{"name":"dup","from":{},"to":{}}]}`, wantPath: "$.forbidden[1].name", wantText: `duplicate rule name "dup"`},
 		{name: "duplicate allowed rule name", input: `{"allowed":[{"name":"dup","from":{},"to":{}},{"name":"dup","from":{},"to":{}}]}`, wantPath: "$.allowed[1].name", wantText: `duplicate rule name "dup"`},
+		{name: "reserved forbidden rule name", input: `{"forbidden":[{"name":"not-in-allowed","from":{},"to":{}}]}`, wantPath: "$.forbidden[0].name", wantText: `rule name "not-in-allowed" is reserved`},
+		{name: "reserved allowed rule name", input: `{"allowed":[{"name":"not-in-allowed","from":{},"to":{}}]}`, wantPath: "$.allowed[0].name", wantText: `rule name "not-in-allowed" is reserved`},
 		{name: "forbidden must be array", input: `{"forbidden":null}`, wantPath: "$.forbidden", wantText: "must be an array"},
 		{name: "empty rule", input: `{"forbidden":[{}]}`, wantPath: "$.forbidden[0]", wantText: `missing required field "name"`},
 		{name: "empty name", input: validRule(`"name":""`), wantPath: "$.forbidden[0].name", wantText: "must not be empty"},
@@ -400,6 +402,11 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		Definitions map[string]struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 			Enum       []string                   `json:"enum"`
+			Type       string                     `json:"type"`
+			MinLength  int                        `json:"minLength"`
+			Not        struct {
+				Const string `json:"const"`
+			} `json:"not"`
 		} `json:"$defs"`
 	}
 	if err := json.Unmarshal(data, &schema); err != nil {
@@ -457,6 +464,22 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 				t.Errorf("enum = %q, want %q", test.got, test.want)
 			}
 		})
+	}
+
+	ruleName := schema.Definitions["ruleName"]
+	if ruleName.Type != "string" || ruleName.MinLength != 1 || ruleName.Not.Const != "not-in-allowed" {
+		t.Errorf("ruleName schema = %#v, want a non-empty string excluding not-in-allowed", ruleName)
+	}
+	for _, definition := range []string{"forbiddenRule", "allowedRule"} {
+		var nameProperty struct {
+			Reference string `json:"$ref"`
+		}
+		if err := json.Unmarshal(schema.Definitions[definition].Properties["name"], &nameProperty); err != nil {
+			t.Fatalf("decode %s name property: %v", definition, err)
+		}
+		if nameProperty.Reference != "#/$defs/ruleName" {
+			t.Errorf("%s name reference = %q, want #/$defs/ruleName", definition, nameProperty.Reference)
+		}
 	}
 }
 
