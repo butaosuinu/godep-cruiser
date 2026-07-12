@@ -1,0 +1,31 @@
+{
+  "name": "package main placement: reject main outside command and tool roots",
+  "positiveControls": [
+    {
+      "rule": "package-main-placement",
+      "from": {
+        "path": "cmd/app/main.go",
+        "line": 1
+      },
+      "packageName": "main"
+    },
+    {
+      "rule": "package-main-placement",
+      "from": {
+        "path": "tools/generate/main.go",
+        "line": 1
+      },
+      "packageName": "main"
+    }
+  ],
+  "violations": [
+    {
+      "rule": "package-main-placement",
+      "severity": "error",
+      "from": {
+        "path": "internal/worker/main.go",
+        "line": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "forbidden target: reject importing an entrypoint package",
+  "violations": [
+    {
+      "rule": "entrypoint-not-importable",
+      "severity": "error",
+      "from": {
+        "path": "internal/app/app.go",
+        "line": 3
+      },
+      "to": {
+        "path": "cmd/shared",
+        "dependencyType": "local"
+      }
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "stdlib-only tree: reject a local dependency from tools",
+  "positiveControls": [
+    {
+      "rule": "tools-stdlib-only",
+      "from": {
+        "path": "tools/generate/main.go",
+        "line": 5
+      },
+      "to": {
+        "path": "fmt",
+        "dependencyType": "stdlib"
+      }
+    }
+  ],
+  "violations": [
+    {
+      "rule": "tools-stdlib-only",
+      "severity": "error",
+      "from": {
+        "path": "tools/generate/main.go",
+        "line": 4
+      },
+      "to": {
+        "path": "internal/core",
+        "dependencyType": "local"
+      }
+    }
+  ]
+}

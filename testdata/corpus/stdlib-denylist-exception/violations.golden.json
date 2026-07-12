@@ -1,0 +1,53 @@
+{
+  "name": "stdlib denylist: reject exact imports while honoring a package exception",
+  "positiveControls": [
+    {
+      "rule": "core-stdlib-denylist",
+      "from": {
+        "path": "internal/core/agent/agent.go",
+        "line": 5
+      },
+      "to": {
+        "path": "os",
+        "dependencyType": "stdlib"
+      }
+    },
+    {
+      "rule": "core-stdlib-denylist",
+      "from": {
+        "path": "internal/core/exact/exact.go",
+        "line": 3
+      },
+      "to": {
+        "path": "net/url",
+        "dependencyType": "stdlib"
+      }
+    }
+  ],
+  "violations": [
+    {
+      "rule": "core-stdlib-denylist",
+      "severity": "error",
+      "from": {
+        "path": "internal/core/agent/agent.go",
+        "line": 4
+      },
+      "to": {
+        "path": "net",
+        "dependencyType": "stdlib"
+      }
+    },
+    {
+      "rule": "core-stdlib-denylist",
+      "severity": "error",
+      "from": {
+        "path": "internal/core/blocked/blocked.go",
+        "line": 3
+      },
+      "to": {
+        "path": "os",
+        "dependencyType": "stdlib"
+      }
+    }
+  ]
+}

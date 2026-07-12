@@ -1,0 +1,41 @@
+{
+  "name": "layer direction: reject core importing infra",
+  "positiveControls": [
+    {
+      "rule": "layer-direction",
+      "from": {
+        "path": "internal/core/core.go",
+        "line": 4
+      },
+      "to": {
+        "path": "internal/core/model",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "layer-direction",
+      "from": {
+        "path": "internal/core/migration.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/infra",
+        "dependencyType": "local"
+      }
+    }
+  ],
+  "violations": [
+    {
+      "rule": "layer-direction",
+      "severity": "error",
+      "from": {
+        "path": "internal/core/core.go",
+        "line": 5
+      },
+      "to": {
+        "path": "internal/infra",
+        "dependencyType": "local"
+      }
+    }
+  ]
+}
