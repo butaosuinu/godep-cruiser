@@ -402,6 +402,11 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		Definitions map[string]struct {
 			Properties map[string]json.RawMessage `json:"properties"`
 			Enum       []string                   `json:"enum"`
+			Type       string                     `json:"type"`
+			MinLength  int                        `json:"minLength"`
+			Not        struct {
+				Const string `json:"const"`
+			} `json:"not"`
 		} `json:"$defs"`
 	}
 	if err := json.Unmarshal(data, &schema); err != nil {
@@ -459,6 +464,22 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 				t.Errorf("enum = %q, want %q", test.got, test.want)
 			}
 		})
+	}
+
+	ruleName := schema.Definitions["ruleName"]
+	if ruleName.Type != "string" || ruleName.MinLength != 1 || ruleName.Not.Const != "not-in-allowed" {
+		t.Errorf("ruleName schema = %#v, want a non-empty string excluding not-in-allowed", ruleName)
+	}
+	for _, definition := range []string{"forbiddenRule", "allowedRule"} {
+		var nameProperty struct {
+			Reference string `json:"$ref"`
+		}
+		if err := json.Unmarshal(schema.Definitions[definition].Properties["name"], &nameProperty); err != nil {
+			t.Fatalf("decode %s name property: %v", definition, err)
+		}
+		if nameProperty.Reference != "#/$defs/ruleName" {
+			t.Errorf("%s name reference = %q, want #/$defs/ruleName", definition, nameProperty.Reference)
+		}
 	}
 }
 
