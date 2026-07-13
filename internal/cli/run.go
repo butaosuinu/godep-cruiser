@@ -22,9 +22,11 @@ Validate dependency rules by default. Options:
   --version              print the version
 `
 
+const maxValidationExitCode = 255
+
 // Run executes the CLI with explicit streams and returns the requested process
-// exit code. Runtime and usage failures return 2; validation returns its exact
-// number of unsuppressed error violations plus stale baseline entries.
+// exit code. Runtime and usage failures return 2; validation returns its number
+// of unsuppressed error violations plus stale baseline entries, capped at 255.
 func Run(args []string, stdout, stderr io.Writer, version string) int {
 	if len(args) == 1 && args[0] == "--version" {
 		if _, err := fmt.Fprintln(stdout, version); err != nil {
@@ -115,7 +117,11 @@ func Run(args []string, stdout, stderr io.Writer, version string) int {
 		return runtimeError(stderr, err)
 	}
 
-	return result.ErrorCount()
+	return validationExitCode(result.ErrorCount())
+}
+
+func validationExitCode(errorCount int) int {
+	return min(errorCount, maxValidationExitCode)
 }
 
 func outputType(value string) (cruiser.OutputType, bool) {

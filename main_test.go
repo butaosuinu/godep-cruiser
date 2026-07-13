@@ -2,12 +2,16 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/butaosuinu/godep-cruiser/config"
 )
 
 const cliHelperEnvironment = "GO_WANT_GODEP_CRUISER_HELPER"
@@ -123,6 +127,42 @@ func TestCLIExitCodeIsErrorCount(t *testing.T) {
 	}
 }
 
+func TestCLIExitCodeCapsLargeErrorCount(t *testing.T) {
+	t.Parallel()
+
+	const errorCount = 256
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "go.mod"), "module example.com/exit-code-test\n\ngo 1.25\n")
+	writeTestFile(t, filepath.Join(root, "sample.go"), "package sample\n\nimport _ \"example.com/dependency\"\n")
+
+	configuration := config.Config{Forbidden: make([]config.ForbiddenRule, errorCount)}
+	for index := range configuration.Forbidden {
+		configuration.Forbidden[index] = config.ForbiddenRule{
+			Name:     fmt.Sprintf("deny-dependency-%03d", index),
+			Severity: config.SeverityError,
+			From:     config.From{},
+			To:       config.To{Path: []string{`^example\.com/dependency$`}},
+		}
+	}
+	configurationData, err := json.Marshal(configuration)
+	if err != nil {
+		t.Fatalf("json.Marshal(configuration) error = %v", err)
+	}
+	configurationPath := filepath.Join(root, "godep-cruiser.json")
+	writeTestFile(t, configurationPath, string(configurationData))
+
+	result := executeCLI(t, "--config", configurationPath, "--scan-root", root)
+	if result.exitCode != 255 {
+		t.Errorf("exit code = %d, want capped status 255; stderr = %q", result.exitCode, result.stderr)
+	}
+	if got := strings.Count(result.stdout, "[error]"); got != errorCount {
+		t.Errorf("error diagnostic count = %d, want %d", got, errorCount)
+	}
+	if result.stderr != "" {
+		t.Errorf("stderr = %q, want empty", result.stderr)
+	}
+}
+
 func TestREADMEQuickStartEndToEnd(t *testing.T) {
 	t.Parallel()
 
@@ -207,4 +247,12 @@ func readGolden(t *testing.T, name string) string {
 	}
 
 	return string(data)
+}
+
+func writeTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatalf("os.WriteFile(%q) error = %v", path, err)
+	}
 }

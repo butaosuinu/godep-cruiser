@@ -49,9 +49,10 @@ godep-cruiser --config godep-cruiser.json --scan-root . \
 ```
 
 Validation exits with the number of unsuppressed `error` violations plus stale
-baseline entries. Warnings and informational violations are still reported but
-do not make the command fail. Flag, configuration, scan, and output failures
-exit 2; successful baseline generation exits 0.
+baseline entries, capped at 255 so every failing validation stays non-zero as a
+process status. Warnings and informational violations are still reported but do
+not make the command fail. Flag, configuration, scan, and output failures exit
+2; successful baseline generation exits 0.
 
 ## Why
 

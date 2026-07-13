@@ -21,6 +21,32 @@ func TestRunVersionWriteFailure(t *testing.T) {
 	}
 }
 
+func TestValidationExitCode(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		errorCount int
+		want       int
+	}{
+		{name: "success", errorCount: 0, want: 0},
+		{name: "single error", errorCount: 1, want: 1},
+		{name: "largest exact count", errorCount: 255, want: 255},
+		{name: "first capped count", errorCount: 256, want: 255},
+		{name: "multiple of process status range", errorCount: 512, want: 255},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := validationExitCode(test.errorCount); got != test.want {
+				t.Errorf("validationExitCode(%d) = %d, want %d", test.errorCount, got, test.want)
+			}
+		})
+	}
+}
+
 type failingWriter struct {
 	err error
 }

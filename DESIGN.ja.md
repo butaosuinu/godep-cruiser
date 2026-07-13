@@ -40,7 +40,7 @@ Go ツール」というニッチは空いている。
 4. grandfathered 違反を baseline に記録して新規違反だけを検出できる。
    **baseline エントリに対応する違反が消えたら、それ自体をエラーにする**(自動失効)
 5. 違反メッセージは修正方法まで示す(「どのルールに、どの edge が、なぜ」)
-6. exit code = error 違反数。CI にそのまま置ける
+6. exit code = error 違反数(255 を上限とする)。CI にそのまま置ける
 
 ### 参照ケース: fanout の 8 テスト
 
@@ -196,8 +196,9 @@ CLI の既定動作は検証であり、`--config FILE` を必須、`--scan-root
 `<scan-root>/go.mod` に固定し、`--baseline FILE` が指定された場合だけ baseline を適用する。
 `--generate-baseline` は既存 baseline を適用する前の全 current violation から canonical JSON を
 stdout に書き、違反の severity にかかわらず生成成功を exit 0 とする。
-検証の exit code は未抑止の error severity 数 + stale entry 数、usage・設定・scan・出力失敗は
-exit 2 とする。
+検証の exit code は未抑止の error severity 数 + stale entry 数を 255 上限で返し、usage・設定・
+scan・出力失敗は exit 2 とする。上限により Unix 系で 256 の倍数が process status 0 に切り詰め
+られることを防ぎ、検証失敗は常に non-zero を維持する。
 
 `go install github.com/butaosuinu/godep-cruiser@latest` を成立させるため、module root は
 共有 CLI runner を呼ぶだけの `package main` とする。`cmd/godep-cruiser` も同じ runner を呼ぶ
