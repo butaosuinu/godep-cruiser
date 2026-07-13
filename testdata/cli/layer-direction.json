@@ -1,0 +1,17 @@
+{
+  "forbidden": [
+    {
+      "name": "layer-direction",
+      "comment": "move the dependency behind a core-owned interface",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/core/"],
+        "pathNot": ["^internal/core/migration\\.go$"]
+      },
+      "to": {
+        "path": ["^internal/infra(?:/|$)"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ]
+}

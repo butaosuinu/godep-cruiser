@@ -1,0 +1,5 @@
+flowchart LR
+  n0["internal/core/core.go"]
+  n1["internal/infra (local)"]
+  n0 -->|"line 5: layer-direction #91;error#93;"| n1
+  linkStyle default stroke:#cf222e,stroke-width:3px

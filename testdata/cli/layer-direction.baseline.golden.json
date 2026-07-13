@@ -1,0 +1,9 @@
+{
+  "entries": [
+    {
+      "rule": "layer-direction",
+      "from": "internal/core/core.go",
+      "to": "example.com/godep-cruiser-fixtures/layer-direction/internal/infra"
+    }
+  ]
+}

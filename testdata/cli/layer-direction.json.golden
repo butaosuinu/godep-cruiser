@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "violations": [
+    {
+      "rule": "layer-direction",
+      "comment": "move the dependency behind a core-owned interface",
+      "severity": "error",
+      "kind": "forbidden",
+      "from": {
+        "path": "internal/core/core.go",
+        "line": 5,
+        "packageName": "core"
+      },
+      "to": {
+        "path": "internal/infra",
+        "importPath": "example.com/godep-cruiser-fixtures/layer-direction/internal/infra",
+        "dependencyType": "local"
+      }
+    }
+  ],
+  "summary": {
+    "total": 1,
+    "error": 1,
+    "warn": 0,
+    "info": 0,
+    "ignore": 0
+  }
+}

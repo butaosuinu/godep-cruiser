@@ -11,7 +11,13 @@ import (
 
 // WriteErr writes concise human-readable diagnostics in input order.
 func WriteErr(writer io.Writer, violations []engine.Violation) error {
-	for _, violation := range violations {
+	return WriteErrReport(writer, Report{Violations: violations})
+}
+
+// WriteErrReport writes violations followed by stale baseline diagnostics in
+// input order. Stale baseline entries are always rendered as errors.
+func WriteErrReport(writer io.Writer, report Report) error {
+	for _, violation := range report.Violations {
 		var diagnostic strings.Builder
 		fmt.Fprintf(
 			&diagnostic,
@@ -37,6 +43,11 @@ func WriteErr(writer io.Writer, violations []engine.Violation) error {
 			fmt.Fprintf(&diagnostic, "  fix: %s\n", comment)
 		}
 		if _, err := io.WriteString(writer, diagnostic.String()); err != nil {
+			return err
+		}
+	}
+	for _, stale := range report.Stale {
+		if _, err := fmt.Fprintf(writer, "[error] %s\n", stale.Error()); err != nil {
 			return err
 		}
 	}

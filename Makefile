@@ -26,7 +26,7 @@ GOLANGCI_LINT_BIN     := $(CURDIR)/.cache/tools/golangci-lint-$(GOLANGCI_LINT_VE
 # `make clean` — remove the built binary.
 
 build:
-	GOCACHE="$(GOCACHE)" $(GO) build -o "$(GO_BIN)" ./cmd/godep-cruiser
+	GOCACHE="$(GOCACHE)" $(GO) build -o "$(GO_BIN)" .
 
 test:
 	GOCACHE="$(GOCACHE)" $(GO) test ./...

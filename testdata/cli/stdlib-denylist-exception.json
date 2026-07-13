@@ -1,0 +1,19 @@
+{
+  "forbidden": [
+    {
+      "name": "core-stdlib-denylist",
+      "severity": "error",
+      "from": {
+        "path": [
+          "^internal/core/agent/agent\\.go()$",
+          "^internal/core/(.+)$"
+        ]
+      },
+      "to": {
+        "path": ["^(?:net|os)$"],
+        "pathNot": ["^$1os$"],
+        "dependencyTypes": ["stdlib"]
+      }
+    }
+  ]
+}

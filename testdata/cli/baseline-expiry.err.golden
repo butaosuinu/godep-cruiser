@@ -1,0 +1,1 @@
+[error] baseline entry is stale: rule "core-no-adapters", from "internal/core/core.go", to "example.test/baseline-expiry/internal/adapters/removed"; remove this entry from the baseline.
