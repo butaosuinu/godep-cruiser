@@ -12,6 +12,10 @@
         {
           "kind": "unclassified-package",
           "subject": "cmd"
+        },
+        {
+          "kind": "unclassified-package",
+          "subject": "tools"
         }
       ]
     },

@@ -20,7 +20,10 @@ import (
 	"github.com/butaosuinu/godep-cruiser/cruiser"
 )
 
-const parityFixtureRoot = "../testdata/parity/fanout-snapshot"
+const (
+	parityFixtureRoot            = "../testdata/parity/fanout-snapshot"
+	parityPackageEnumerationRule = "parity-package-enumeration"
+)
 
 type parityOracle struct {
 	Source paritySource  `json:"source"`
@@ -162,15 +165,36 @@ func configuredParityRunner(configName string) func(*testing.T, string, parityCh
 func runAllPackagesClassified(t *testing.T, fixtureRoot string, _ parityCheck) []parityFinding {
 	t.Helper()
 
-	result := validateParityConfig(t, fixtureRoot, "all-packages-classified.json", nil)
+	configuration := loadParityConfig(t, fixtureRoot, "all-packages-classified.json")
+	configuration.Forbidden = append(configuration.Forbidden, config.ForbiddenRule{
+		Name:     parityPackageEnumerationRule,
+		Severity: config.SeverityInfo,
+		From: config.From{
+			Path:        []string{`^(?:internal|cmd|tools)(?:/|$)`},
+			PackageName: []string{`^.+$`},
+		},
+	})
+	result := validateParityConfiguration(t, fixtureRoot, configuration, nil)
 	if len(result.Known) != 0 || len(result.Stale) != 0 {
 		t.Fatalf("classification result has known=%d stale=%d, want both zero", len(result.Known), len(result.Stale))
 	}
 
 	findings := make([]parityFinding, 0, len(result.Violations))
 	for _, violation := range result.Violations {
+		if violation.Rule == parityPackageEnumerationRule {
+			if violation.Kind != cruiser.ViolationKindForbidden ||
+				violation.Severity != config.SeverityInfo ||
+				violation.To != nil {
+				t.Fatalf("package-enumeration violation = %+v, want an info source violation", violation)
+			}
+			subject := path.Dir(violation.From.Path)
+			if !isClassifiedFanoutPackage(subject) {
+				findings = append(findings, parityFinding{Kind: "unclassified-package", Subject: subject})
+			}
+			continue
+		}
 		if violation.Kind != cruiser.ViolationKindNotAllowed || violation.Rule != cruiser.NotInAllowedRuleName {
-			t.Fatalf("classification violation = %+v, want an allowed-miss violation", violation)
+			t.Fatalf("classification violation = %+v, want a package-enumeration or allowed-miss violation", violation)
 		}
 
 		subjects := make([]string, 0, 2)
@@ -330,17 +354,37 @@ func validateParityConfig(
 ) cruiser.Result {
 	t.Helper()
 
+	configuration := loadParityConfig(t, fixtureRoot, configName)
+
+	return validateParityConfiguration(t, fixtureRoot, configuration, baseline)
+}
+
+func loadParityConfig(t *testing.T, fixtureRoot, configName string) *config.Config {
+	t.Helper()
+
 	configuration, err := config.LoadFile(filepath.Join(fixtureRoot, "configs", configName))
 	if err != nil {
 		t.Fatalf("config.LoadFile(%q) error = %v", configName, err)
 	}
+
+	return configuration
+}
+
+func validateParityConfiguration(
+	t *testing.T,
+	fixtureRoot string,
+	configuration *config.Config,
+	baseline *cruiser.Baseline,
+) cruiser.Result {
+	t.Helper()
+
 	result, err := cruiser.Validate(configuration, cruiser.Options{
 		ScanRoot:  fixtureRoot,
 		GoModPath: filepath.Join(fixtureRoot, "go.mod"),
 		Baseline:  baseline,
 	})
 	if err != nil {
-		t.Fatalf("cruiser.Validate(%q) error = %v", configName, err)
+		t.Fatalf("cruiser.Validate() error = %v", err)
 	}
 
 	return result

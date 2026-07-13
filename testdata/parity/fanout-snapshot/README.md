@@ -16,6 +16,11 @@ records the hand-written oracle projection in the upstream test order.
 same package path. fanout classifies only `cmd/<subdirectory>` packages, so the
 source and target both collapse to the single unclassified subject `cmd`.
 
+`tools/unclassified.go` deliberately lives directly in `tools/`, has no
+imports, and is not imported. The parity harness adds a source-only probe rule
+through the public configuration API so this isolated package is still
+enumerated and reported as the unclassified subject `tools`.
+
 `internal/retired/README.md` intentionally leaves a non-Go-only directory below
 `internal/`. fanout's `TestInternalTreeShape` sees that directory, while
 godep-cruiser intentionally scans Go source only; the oracle records it as an

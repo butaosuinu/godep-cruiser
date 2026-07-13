@@ -58,7 +58,7 @@ parity fixture の oracle は fanout の commit
 
 | fanout のチェック | godep-cruiser での翻訳 | parity 結果 |
 |---|---|---|
-| `TestAllPackagesClassified` | allowed 設定の fail-closed 違反 `not-in-allowed` | 一致 |
+| `TestAllPackagesClassified` | source-only probe による全 package 列挙 + allowed 設定の fail-closed 違反 `not-in-allowed` | 一致 |
 | `TestInternalTreeShape` | 非 Go ファイルを含む実ディレクトリ形状は走査対象外 | 期待済みギャップ |
 | `TestExplicitLayerMapIsCurrent` | `internal/arch` を明示した scan root として検証し、Go ファイル 0 件を失敗させる | 一致 |
 | `TestLayerImportDirection` | `layer-import-direction` と完全一致 baseline によるファイル単位例外および自動失効 | 一致 |
