@@ -1,0 +1,12 @@
+{
+  "forbidden": [
+    {
+      "name": "tools-stdlib-only",
+      "severity": "error",
+      "from": {"path": ["^tools/[^/]+/"]},
+      "to": {
+        "dependencyTypes": ["local", "module", "unresolved"]
+      }
+    }
+  ]
+}

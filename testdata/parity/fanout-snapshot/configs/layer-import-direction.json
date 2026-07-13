@@ -1,0 +1,73 @@
+{
+  "forbidden": [
+    {
+      "name": "layer-import-direction-core",
+      "severity": "error",
+      "from": {"path": ["^internal/core/[^/]+/"]},
+      "to": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/|internal/arch(?:/|$)|cmd/|tools/)"],
+        "pathNot": ["^internal/core(?:/|$)"],
+        "dependencyTypes": ["local"]
+      }
+    },
+    {
+      "name": "layer-import-direction-app",
+      "severity": "error",
+      "from": {"path": ["^internal/app/[^/]+/"]},
+      "to": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/|internal/arch(?:/|$)|cmd/|tools/)"],
+        "pathNot": ["^internal/(?:core|app|infra)(?:/|$)"],
+        "dependencyTypes": ["local"]
+      }
+    },
+    {
+      "name": "layer-import-direction",
+      "severity": "error",
+      "from": {"path": ["^internal/infra/[^/]+/"]},
+      "to": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/|internal/arch(?:/|$)|cmd/|tools/)"],
+        "pathNot": ["^internal/(?:core|infra)(?:/|$)"],
+        "dependencyTypes": ["local"]
+      }
+    },
+    {
+      "name": "layer-import-direction-ui",
+      "severity": "error",
+      "from": {"path": ["^internal/ui/[^/]+/"]},
+      "to": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/|internal/arch(?:/|$)|cmd/|tools/)"],
+        "pathNot": ["^internal/(?:core|app|infra|ui)(?:/|$)"],
+        "dependencyTypes": ["local"]
+      }
+    },
+    {
+      "name": "layer-import-direction-cmd",
+      "severity": "error",
+      "from": {"path": ["^cmd/[^/]+/"]},
+      "to": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/|internal/arch(?:/|$)|cmd/|tools/)"],
+        "pathNot": ["^internal/(?:core|app|infra|ui)(?:/|$)"],
+        "dependencyTypes": ["local"]
+      }
+    },
+    {
+      "name": "layer-import-direction-tools",
+      "severity": "error",
+      "from": {"path": ["^tools/[^/]+/"]},
+      "to": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/|internal/arch(?:/|$)|cmd/|tools/)"],
+        "pathNot": ["^tools(?:/|$)"],
+        "dependencyTypes": ["local"]
+      }
+    },
+    {
+      "name": "layer-import-direction-meta",
+      "severity": "error",
+      "from": {"path": ["^internal/arch(?:/|$)"]},
+      "to": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/|internal/arch(?:/|$)|cmd/|tools/)"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ]
+}

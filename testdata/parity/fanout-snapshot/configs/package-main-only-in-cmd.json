@@ -1,0 +1,22 @@
+{
+  "forbidden": [
+    {
+      "name": "package-main-placement",
+      "severity": "error",
+      "from": {
+        "pathNot": ["^(?:cmd/fanout(?:/|$)|tools/[^/]+/)"],
+        "packageName": ["^main$"]
+      },
+      "to": {}
+    },
+    {
+      "name": "cmd-not-importable",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "path": ["^cmd(?:/|$)"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ]
+}
