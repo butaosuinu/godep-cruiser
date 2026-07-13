@@ -1,0 +1,140 @@
+{
+  "source": {
+    "repository": "https://github.com/butaosuinu/fanout",
+    "commit": "b20d79497896adc99b09387b0c9f262ab5730375",
+    "blob": "fe25b893e97fdf967001047b96d852b4f817c738",
+    "path": "internal/arch/arch_test.go"
+  },
+  "checks": [
+    {
+      "name": "TestAllPackagesClassified",
+      "findings": [
+        {
+          "kind": "unclassified-package",
+          "subject": "cmd"
+        }
+      ]
+    },
+    {
+      "name": "TestInternalTreeShape",
+      "findings": [],
+      "expectedGaps": [
+        {
+          "kind": "directory-shape",
+          "subject": "internal/retired",
+          "reason": "godep-cruiser intentionally scans Go source and cannot observe a non-Go-only directory"
+        }
+      ]
+    },
+    {
+      "name": "TestExplicitLayerMapIsCurrent",
+      "findings": []
+    },
+    {
+      "name": "TestLayerImportDirection",
+      "findings": [
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "internal/app/service/service.go",
+          "line": 8,
+          "to": "cmd/fanout"
+        },
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "internal/core/bad/bad.go",
+          "line": 8,
+          "to": "internal/infra/store"
+        },
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "tools/reviewrisk/bad.go",
+          "line": 6,
+          "to": "internal/core/model"
+        },
+        {
+          "kind": "known-baseline",
+          "severity": "error",
+          "from": "internal/infra/team/path_test.go",
+          "line": 8,
+          "to": "internal/app/briefing"
+        },
+        {
+          "kind": "stale-baseline",
+          "severity": "error",
+          "from": "internal/infra/team/removed_test.go",
+          "to": "internal/app/briefing"
+        }
+      ]
+    },
+    {
+      "name": "TestCorePurity",
+      "findings": [
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "internal/core/bad/bad.go",
+          "line": 4,
+          "to": "example.com/thirdparty/pkg"
+        },
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "internal/core/bad/bad.go",
+          "line": 6,
+          "to": "os"
+        }
+      ]
+    },
+    {
+      "name": "TestToolsStdlibOnly",
+      "findings": [
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "tools/reviewrisk/bad.go",
+          "line": 4,
+          "to": "example.com/thirdparty/tool"
+        },
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "tools/reviewrisk/bad.go",
+          "line": 6,
+          "to": "internal/core/model"
+        }
+      ]
+    },
+    {
+      "name": "TestPackageMainOnlyInCmd",
+      "findings": [
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "cmd/unclassified.go",
+          "line": 3,
+          "to": "cmd"
+        },
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "internal/app/service/service.go",
+          "line": 8,
+          "to": "cmd/fanout"
+        },
+        {
+          "kind": "forbidden",
+          "severity": "error",
+          "from": "internal/core/worker/main.go",
+          "line": 1
+        }
+      ]
+    },
+    {
+      "name": "TestScanSanity",
+      "findings": []
+    }
+  ]
+}

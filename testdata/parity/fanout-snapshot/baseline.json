@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "rule": "layer-import-direction",
+      "from": "internal/infra/team/path_test.go",
+      "to": "example.test/fanout-snapshot/internal/app/briefing"
+    },
+    {
+      "rule": "layer-import-direction",
+      "from": "internal/infra/team/removed_test.go",
+      "to": "example.test/fanout-snapshot/internal/app/briefing"
+    }
+  ]
+}

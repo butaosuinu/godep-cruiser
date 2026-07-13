@@ -1,0 +1,56 @@
+{
+  "forbidden": [
+    {
+      "name": "core-stdlib-denylist",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/core/[^/]+/"],
+        "pathNot": ["_test\\.go$"]
+      },
+      "to": {
+        "path": ["^(?:database/sql|io/ioutil|net|net/http|syscall)$"],
+        "dependencyTypes": ["stdlib"]
+      }
+    },
+    {
+      "name": "core-stdlib-os",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/core/[^/]+/"],
+        "pathNot": [
+          "_test\\.go$",
+          "^internal/core/agent(?:/|$)",
+          "^internal/core/planspec(?:/|$)"
+        ]
+      },
+      "to": {
+        "path": ["^os$"],
+        "dependencyTypes": ["stdlib"]
+      }
+    },
+    {
+      "name": "core-stdlib-os-exec",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/core/[^/]+/"],
+        "pathNot": [
+          "_test\\.go$",
+          "^internal/core/agent(?:/|$)"
+        ]
+      },
+      "to": {
+        "path": ["^os/exec$"],
+        "dependencyTypes": ["stdlib"]
+      }
+    },
+    {
+      "name": "core-third-party",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/core/[^/]+/"],
+        "pathNot": ["_test\\.go$"]
+      },
+      "to": {"dependencyTypes": ["module"]}
+    }
+  ]
+}

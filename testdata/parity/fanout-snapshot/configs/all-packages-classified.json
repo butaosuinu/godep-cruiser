@@ -1,0 +1,24 @@
+{
+  "allowed": [
+    {
+      "name": "classified-source-external-target",
+      "from": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/[^/]+/|internal/arch(?:/|$)|cmd/[^/]+/|tools/[^/]+/)"]
+      },
+      "to": {
+        "dependencyTypes": ["stdlib", "module", "unresolved"]
+      }
+    },
+    {
+      "name": "classified-source-local-target",
+      "from": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/[^/]+/|internal/arch(?:/|$)|cmd/[^/]+/|tools/[^/]+/)"]
+      },
+      "to": {
+        "path": ["^(?:internal/(?:core|app|infra|ui)/|internal/arch(?:/|$)|cmd/|tools/)"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ],
+  "allowedSeverity": "error"
+}
