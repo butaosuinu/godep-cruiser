@@ -121,6 +121,87 @@ func TestApplyRequiredViolationThreeStates(t *testing.T) {
 	}
 }
 
+func TestApplyNumberOfDependentsViolationThreeStates(t *testing.T) {
+	t.Parallel()
+
+	moreThanZero := 0
+	configuration := config.Config{Forbidden: []config.ForbiddenRule{{
+		Name:     "popular-package",
+		Severity: config.SeverityError,
+		From: config.From{
+			Path:                       []string{`^internal/hub/hub\.go$`},
+			NumberOfDependentsMoreThan: &moreThanZero,
+		},
+		To: config.To{},
+	}}}
+	files := []scanner.File{
+		{
+			Path:        "internal/app/app.go",
+			PackagePath: "internal/app",
+			Imports: []scanner.Import{{
+				Path:         "example.com/project/internal/hub",
+				ResolvedPath: "internal/hub",
+				Type:         scanner.DependencyTypeLocal,
+			}},
+		},
+		{
+			Path:        "internal/hub/hub.go",
+			PackagePath: "internal/hub",
+			Package:     "hub",
+			PackageLine: 1,
+		},
+	}
+	current, err := engine.Evaluate(&configuration, files)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if len(current) != 1 || current[0].To != nil {
+		t.Fatalf("Evaluate() = %#v, want one source-only dependent-count violation", current)
+	}
+	entry := baseline.Entry{Rule: current[0].Rule, From: current[0].From.Path}
+	if got := baseline.Generate(current); !reflect.DeepEqual(
+		got,
+		baseline.Baseline{Entries: []baseline.Entry{entry}},
+	) {
+		t.Fatalf("Generate(numberOfDependents) = %#v, want source-only entry %#v", got, entry)
+	}
+
+	tests := []struct {
+		name     string
+		baseline baseline.Baseline
+		current  []engine.Violation
+		want     baseline.Result
+	}{
+		{
+			name:    "unmatched metric violation is reported",
+			current: current,
+			want:    baseline.Result{Violations: current},
+		},
+		{
+			name:     "matching source-only entry makes metric violation known",
+			baseline: baseline.Baseline{Entries: []baseline.Entry{entry}},
+			current:  current,
+			want:     baseline.Result{Known: current},
+		},
+		{
+			name:     "missing metric violation makes source-only entry stale",
+			baseline: baseline.Baseline{Entries: []baseline.Entry{entry}},
+			want:     baseline.Result{Stale: []baseline.StaleError{{Entry: entry}}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := baseline.Apply(test.baseline, test.current)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("Apply() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestApplyUsesOnlyExactIdentityKeys(t *testing.T) {
 	t.Parallel()
 

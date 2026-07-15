@@ -158,22 +158,27 @@ func (validator configValidator) rule(node *jsonNode, path string, kind ruleKind
 func (validator configValidator) from(
 	node *jsonNode,
 	path string,
-	allowOrphan bool,
+	allowGraphFields bool,
 ) ([]*regexp.Regexp, error) {
 	allowedFields := []string{"path", "pathNot", "packageName"}
-	if allowOrphan {
-		allowedFields = append(allowedFields, "orphan")
+	if allowGraphFields {
+		allowedFields = append(
+			allowedFields,
+			"orphan",
+			"numberOfDependentsLessThan",
+			"numberOfDependentsMoreThan",
+		)
 	}
-	fields, err := validator.object(node, path, allowedFields...)
-	if err != nil {
-		return nil, err
+	fields, validationErr := validator.object(node, path, allowedFields...)
+	if validationErr != nil {
+		return nil, validationErr
 	}
 
 	var fromPatterns []*regexp.Regexp
 	if member, ok := fields["path"]; ok {
-		fromPatterns, err = validator.regularExpressions(member.value, fieldPath(path, "path"))
-		if err != nil {
-			return nil, err
+		fromPatterns, validationErr = validator.regularExpressions(member.value, fieldPath(path, "path"))
+		if validationErr != nil {
+			return nil, validationErr
 		}
 	}
 	if member, ok := fields["pathNot"]; ok {
@@ -192,7 +197,78 @@ func (validator configValidator) from(
 		}
 	}
 
+	lessThan, hasLessThan, err := validator.dependentCount(
+		fields,
+		path,
+		"numberOfDependentsLessThan",
+	)
+	if err != nil {
+		return nil, err
+	}
+	if hasLessThan && lessThan < 1 {
+		member := fields["numberOfDependentsLessThan"]
+		return nil, validator.at(
+			member.value,
+			fieldPath(path, "numberOfDependentsLessThan"),
+			errors.New("must be at least 1"),
+		)
+	}
+	moreThan, hasMoreThan, err := validator.dependentCount(
+		fields,
+		path,
+		"numberOfDependentsMoreThan",
+	)
+	if err != nil {
+		return nil, err
+	}
+	if hasLessThan && hasMoreThan && moreThan >= lessThan-1 {
+		member := fields["numberOfDependentsMoreThan"]
+		return nil, validator.at(
+			member.value,
+			fieldPath(path, "numberOfDependentsMoreThan"),
+			fmt.Errorf(
+				"defines an empty integer range: dependent count must be greater than %d and less than %d",
+				moreThan,
+				lessThan,
+			),
+		)
+	}
+
 	return fromPatterns, nil
+}
+
+func (validator configValidator) dependentCount(
+	fields map[string]jsonMember,
+	path string,
+	name string,
+) (int, bool, error) {
+	member, ok := fields[name]
+	if !ok {
+		return 0, false, nil
+	}
+	memberPath := fieldPath(path, name)
+	if err := validator.kind(member.value, memberPath, jsonNumber); err != nil {
+		return 0, false, err
+	}
+	if member.value.text == "" || strings.IndexFunc(member.value.text, func(character rune) bool {
+		return character < '0' || character > '9'
+	}) >= 0 {
+		return 0, false, validator.at(
+			member.value,
+			memberPath,
+			errors.New("must be a non-negative integer without decimal or exponent notation"),
+		)
+	}
+	value, err := strconv.Atoi(member.value.text)
+	if err != nil {
+		return 0, false, validator.at(
+			member.value,
+			memberPath,
+			errors.New("must be a non-negative integer representable as an int"),
+		)
+	}
+
+	return value, true, nil
 }
 
 func (validator configValidator) to(

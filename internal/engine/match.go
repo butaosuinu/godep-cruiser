@@ -9,10 +9,12 @@ import (
 )
 
 type fromMatcher struct {
-	path        []*regexp.Regexp
-	pathNot     []*regexp.Regexp
-	orphan      *bool
-	packageName []*regexp.Regexp
+	path                       []*regexp.Regexp
+	pathNot                    []*regexp.Regexp
+	orphan                     *bool
+	packageName                []*regexp.Regexp
+	numberOfDependentsLessThan *int
+	numberOfDependentsMoreThan *int
 }
 
 type fileFacts struct {
@@ -129,10 +131,12 @@ func compileFrom(from config.From) (fromMatcher, error) {
 	}
 
 	return fromMatcher{
-		path:        pathPatterns,
-		pathNot:     pathNotPatterns,
-		orphan:      from.Orphan,
-		packageName: packagePatterns,
+		path:                       pathPatterns,
+		pathNot:                    pathNotPatterns,
+		orphan:                     from.Orphan,
+		packageName:                packagePatterns,
+		numberOfDependentsLessThan: from.NumberOfDependentsLessThan,
+		numberOfDependentsMoreThan: from.NumberOfDependentsMoreThan,
 	}, nil
 }
 
@@ -178,6 +182,14 @@ func (matcher fromMatcher) matches(file scanner.File, facts fileFacts) ([]string
 		return nil, false
 	}
 	if len(matcher.packageName) > 0 && !matchesAny(matcher.packageName, file.Package) {
+		return nil, false
+	}
+	if matcher.numberOfDependentsLessThan != nil &&
+		facts.numberOfDependents >= *matcher.numberOfDependentsLessThan {
+		return nil, false
+	}
+	if matcher.numberOfDependentsMoreThan != nil &&
+		facts.numberOfDependents <= *matcher.numberOfDependentsMoreThan {
 		return nil, false
 	}
 
@@ -247,7 +259,10 @@ func containsDependencyType(types []config.DependencyType, dependencyType scanne
 }
 
 func isSourceOnly(from config.From, to config.To) bool {
-	hasSourcePredicate := from.Orphan != nil || len(from.PackageName) > 0
+	hasSourcePredicate := from.Orphan != nil ||
+		len(from.PackageName) > 0 ||
+		from.NumberOfDependentsLessThan != nil ||
+		from.NumberOfDependentsMoreThan != nil
 	return hasSourcePredicate && isEmptyTo(to)
 }
 

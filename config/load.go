@@ -304,7 +304,11 @@ func (parser *jsonParser) parsePrimitive(kind jsonKind) *jsonNode {
 		parser.index++
 	}
 
-	return &jsonNode{kind: kind, offset: start}
+	return &jsonNode{
+		kind:   kind,
+		offset: start,
+		text:   string(parser.data[start:parser.index]),
+	}
 }
 
 func (parser *jsonParser) skipSpace() {
