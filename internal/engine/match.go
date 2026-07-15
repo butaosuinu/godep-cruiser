@@ -27,6 +27,7 @@ type toMatcher struct {
 	pathNot            []string
 	dependencyTypes    []config.DependencyType
 	dependencyTypesNot []config.DependencyType
+	reachable          *bool
 }
 
 type compiledForbiddenRule struct {
@@ -159,6 +160,7 @@ func compileTo(to config.To) toMatcher {
 		pathNot:            to.PathNot,
 		dependencyTypes:    to.DependencyTypes,
 		dependencyTypesNot: to.DependencyTypesNot,
+		reachable:          to.Reachable,
 	}
 }
 
@@ -208,23 +210,32 @@ func matchesAny(patterns []*regexp.Regexp, value string) bool {
 
 func (matcher toMatcher) matches(dependency scanner.Import, captures []string) (bool, error) {
 	dependencyPath := effectiveDependencyPath(dependency)
-	if len(matcher.path) > 0 {
-		matched, err := matchesAnyTemplate(matcher.path, dependencyPath, captures)
-		if err != nil || !matched {
-			return false, err
-		}
-	}
-	if len(matcher.pathNot) > 0 {
-		matched, err := matchesAnyTemplate(matcher.pathNot, dependencyPath, captures)
-		if err != nil || matched {
-			return false, err
-		}
+	matched, err := matcher.matchesPackagePath(dependencyPath, captures)
+	if err != nil || !matched {
+		return false, err
 	}
 	if len(matcher.dependencyTypes) > 0 && !containsDependencyType(matcher.dependencyTypes, dependency.Type) {
 		return false, nil
 	}
 	if containsDependencyType(matcher.dependencyTypesNot, dependency.Type) {
 		return false, nil
+	}
+
+	return true, nil
+}
+
+func (matcher toMatcher) matchesPackagePath(packagePath string, captures []string) (bool, error) {
+	if len(matcher.path) > 0 {
+		matched, err := matchesAnyTemplate(matcher.path, packagePath, captures)
+		if err != nil || !matched {
+			return false, err
+		}
+	}
+	if len(matcher.pathNot) > 0 {
+		matched, err := matchesAnyTemplate(matcher.pathNot, packagePath, captures)
+		if err != nil || matched {
+			return false, err
+		}
 	}
 
 	return true, nil
@@ -270,7 +281,8 @@ func isEmptyTo(to config.To) bool {
 	return len(to.Path) == 0 &&
 		len(to.PathNot) == 0 &&
 		len(to.DependencyTypes) == 0 &&
-		len(to.DependencyTypesNot) == 0
+		len(to.DependencyTypesNot) == 0 &&
+		to.Reachable == nil
 }
 
 func effectiveSeverity(severity config.Severity) config.Severity {

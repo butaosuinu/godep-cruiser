@@ -30,9 +30,11 @@ type ViolationKind string
 
 // Supported violation kinds.
 const (
-	ViolationKindForbidden  ViolationKind = "forbidden"
-	ViolationKindNotAllowed ViolationKind = NotInAllowedRuleName
-	ViolationKindRequired   ViolationKind = "required"
+	ViolationKindForbidden   ViolationKind = "forbidden"
+	ViolationKindNotAllowed  ViolationKind = NotInAllowedRuleName
+	ViolationKindRequired    ViolationKind = "required"
+	ViolationKindReachable   ViolationKind = "reachable"
+	ViolationKindUnreachable ViolationKind = "unreachable"
 )
 
 // Source identifies the importing file and source position of a violation.
@@ -47,14 +49,15 @@ type Dependency struct {
 	// Path is module-relative for local dependencies and otherwise the resolved
 	// dependency path. It falls back to ImportPath when resolution has no path.
 	Path string
-	// ImportPath is the path exactly as declared by the Go source file.
+	// ImportPath is the path exactly as declared by the Go source file. It is
+	// empty for reachable violations, whose target is a synthesized package node.
 	ImportPath string
 	Type       config.DependencyType
 }
 
 // Violation describes one unsuppressed or baseline-known rule violation. To is
-// nil for source-only rules such as orphan, package-name, dependent-count, and
-// required checks.
+// nil for source-only rules such as orphan, package-name, dependent-count,
+// required, and unreachable checks.
 type Violation struct {
 	Rule     string
 	Comment  string

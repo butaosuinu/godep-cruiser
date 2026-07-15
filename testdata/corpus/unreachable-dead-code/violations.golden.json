@@ -1,0 +1,21 @@
+{
+  "name": "unreachable: report every file in a package outside the entrypoint closure",
+  "violations": [
+    {
+      "rule": "entrypoint-reaches-production",
+      "severity": "error",
+      "from": {
+        "path": "internal/dead/a.go",
+        "line": 1
+      }
+    },
+    {
+      "rule": "entrypoint-reaches-production",
+      "severity": "error",
+      "from": {
+        "path": "internal/dead/b.go",
+        "line": 1
+      }
+    }
+  ]
+}

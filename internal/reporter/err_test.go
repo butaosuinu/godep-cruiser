@@ -201,6 +201,27 @@ func TestWriteErrSpecialCases(t *testing.T) {
 				"  fix: import the shared package\n",
 		},
 		{
+			name: "reachable edge explains transitive reachability",
+			violations: []engine.Violation{{
+				Rule:     "production-no-testutil",
+				Severity: "error",
+				Kind:     engine.ViolationKindReachable,
+				From:     engine.Source{Path: "internal/service/service.go", Line: 4},
+				To:       &engine.Dependency{Path: "internal/testutil", Type: "local"},
+			}},
+			want: "[error] rule \"production-no-testutil\": internal/service/service.go:4 -> internal/testutil (local): target package is transitively reachable\n",
+		},
+		{
+			name: "unreachable source explains dead package",
+			violations: []engine.Violation{{
+				Rule:     "entrypoints-reach-production",
+				Severity: "warn",
+				Kind:     engine.ViolationKindUnreachable,
+				From:     engine.Source{Path: "internal/dead/dead.go", Line: 1},
+			}},
+			want: "[warn] rule \"entrypoints-reach-production\": internal/dead/dead.go:1: package is unreachable from matching sources\n",
+		},
+		{
 			name: "diagnostic values cannot add lines",
 			violations: []engine.Violation{{
 				Rule:     "escaped",

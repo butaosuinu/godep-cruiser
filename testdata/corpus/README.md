@@ -20,30 +20,35 @@ Each expected violation contains:
 
 - `rule` and `severity` (`error`, `warn`, `info`, or `ignore`)
 - `from.path`, relative to the fixture module with `/` separators
-- `from.line`, the import line for edge violations or package line for
-  source-only violations
+- `from.line`, the direct import line for ordinary edge violations, the
+  initiating local import line for reachable violations, or the package line
+  for source-only violations
 - optional `to.path` and `to.dependencyType`; `package-main-placement`,
-  `no-orphans`, `handler-requires-logging`, `minimum-two-dependents`, and
-  `maximum-two-dependents` violations are source-only and must omit `to`,
-  while every other corpus violation must include it
+  `no-orphans`, `handler-requires-logging`, `minimum-two-dependents`,
+  `maximum-two-dependents`, and `entrypoint-reaches-production` violations are
+  source-only and must omit `to`, while every other corpus violation must
+  include it
 
 Dependency classification is delegated to `internal/scanner`. `to.path` uses
 the resolver's normalized path when it is non-empty and otherwise retains the
 source import path. In particular, scanner keeps the cgo pseudo-import as raw
 path `C`, empty resolved path, and type `unresolved`; the golden target is
-therefore `C`. Violation arrays are sorted by rule, severity, from path, line,
-to path, and dependency type. The loader rejects unknown fields, duplicate JSON
-object keys, invalid enum values, stale source locations, and repeated
-violation identities even when their severities differ.
+therefore `C`. Reachable violations are the exception: their target is the
+module-relative package reached through the local graph rather than the import
+named on `from.line`. Violation arrays are sorted by rule, severity, from path,
+line, to path, and dependency type. The loader rejects unknown fields,
+duplicate JSON object keys, invalid enum values, stale source locations, and
+repeated violation identities even when their severities differ.
 
 Optional `positiveControls` pin source facts that must stay in a fixture but
 must not appear in engine violation output. Each control has `rule` and `from`.
 Only `package-main-placement` controls use a source `packageName` and omit
-`to`; every other rule, including `no-orphans`, uses an import target in `to`
-and omits `packageName`. Controls are sorted and checked as strictly as
-violations. They keep allowed imports, exceptions, and allowed package roots
-from disappearing while a violation-only comparison still passes. A control
-and violation may not claim the same rule/source/target identity.
+`to`; other controls, including `no-orphans`, represent an import fact in `to`
+and omit `packageName`. The unreachable fixture does not use source-only
+positive controls. Controls are sorted and checked as strictly as violations.
+They keep allowed imports, exceptions, and allowed package roots from
+disappearing while a violation-only comparison still passes. A control and
+violation may not claim the same rule/source/target identity.
 
 The harness also derives all disconnected files and all `package main` files
 outside `cmd/` and `tools/` from the parsed fixture. It rejects any such
@@ -77,13 +82,16 @@ and compare them with the golden list.
 | `forbidden-import-target` | Product code rejects imports of a designated entrypoint tree. |
 | `orphan-file` | A disconnected file is reported while connected files are not. |
 | `package-main-placement` | `package main` is rejected outside approved command and tool roots. |
+| `reachable-test-helper` | Of two files in one package, only the file whose initiating import transitively reaches test helpers is rejected. |
 | `required-dependency` | Each matching handler file must import the logging package; an importless file violates while a compliant sibling is retained as a positive control. |
 | `unclassified-dependency` | An allowed-rule set fails closed on an unclassified local dependency. |
+| `unreachable-dead-code` | Every file in a package outside the entrypoint package closure is reported while live packages remain clean. |
 
 The first eight semantic cases are owned by issue #4; `baseline-expiry` is the
 ninth case and is owned by issue #6; `required-dependency` is the tenth and is
 owned by issue #24; `number-of-dependents` is the eleventh and is owned by
-issue #28. They are inspired by
+issue #28; the reachable and unreachable cases are the twelfth and thirteenth
+and are owned by issue #27. They are inspired by
 fanout's architecture checks but are not a one-to-one copy of its test
 functions; filesystem tree-shape checks remain outside the import graph's
 scope.

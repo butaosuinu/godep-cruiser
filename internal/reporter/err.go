@@ -61,6 +61,8 @@ func edgeReason(kind engine.ViolationKind) string {
 		return "forbidden dependency"
 	case engine.ViolationKindNotAllowed:
 		return "dependency matches no allowed rule"
+	case engine.ViolationKindReachable:
+		return "target package is transitively reachable"
 	default:
 		return fmt.Sprintf("unknown violation kind %q", kind)
 	}
@@ -72,6 +74,9 @@ func sourceReason(kind engine.ViolationKind) string {
 	}
 	if kind == engine.ViolationKindRequired {
 		return "required dependency is missing"
+	}
+	if kind == engine.ViolationKindUnreachable {
+		return "package is unreachable from matching sources"
 	}
 
 	return fmt.Sprintf("unknown violation kind %q", kind)

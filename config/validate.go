@@ -147,7 +147,7 @@ func (validator configValidator) rule(node *jsonNode, path string, kind ruleKind
 		to.value,
 		fieldPath(path, "to"),
 		fromPatterns,
-		kind == requiredRuleKind,
+		kind,
 	); err != nil {
 		return err
 	}
@@ -275,30 +275,57 @@ func (validator configValidator) to(
 	node *jsonNode,
 	path string,
 	fromPatterns []*regexp.Regexp,
-	requireCondition bool,
+	kind ruleKind,
 ) error {
-	fields, err := validator.object(
-		node,
-		path,
+	allowedFields := []string{
 		"path",
 		"pathNot",
 		"dependencyTypes",
 		"dependencyTypesNot",
+	}
+	if kind == forbiddenRuleKind {
+		allowedFields = append(allowedFields, "reachable")
+	}
+	fields, err := validator.object(
+		node,
+		path,
+		allowedFields...,
 	)
 	if err != nil {
 		return err
 	}
-	if requireCondition && len(fields) == 0 {
+	if kind == requiredRuleKind && len(fields) == 0 {
 		return validator.at(node, path, errors.New("must define at least one condition"))
 	}
 
+	allowCaptures := true
+	if member, ok := fields["reachable"]; ok {
+		reachable, validationErr := validator.boolean(member.value, fieldPath(path, "reachable"))
+		if validationErr != nil {
+			return validationErr
+		}
+		if _, ok := fields["path"]; !ok {
+			return validator.at(node, path, errors.New(`field "reachable" requires field "path"`))
+		}
+		for _, conflict := range []string{"dependencyTypes", "dependencyTypesNot"} {
+			if conflictingMember, ok := fields[conflict]; ok {
+				return validator.at(
+					conflictingMember.value,
+					fieldPath(path, conflict),
+					fmt.Errorf(`field %q cannot be combined with "reachable"`, conflict),
+				)
+			}
+		}
+		allowCaptures = reachable
+	}
+
 	if member, ok := fields["path"]; ok {
-		if err := validator.templates(member.value, fieldPath(path, "path"), fromPatterns); err != nil {
+		if err := validator.templates(member.value, fieldPath(path, "path"), fromPatterns, allowCaptures); err != nil {
 			return err
 		}
 	}
 	if member, ok := fields["pathNot"]; ok {
-		if err := validator.templates(member.value, fieldPath(path, "pathNot"), fromPatterns); err != nil {
+		if err := validator.templates(member.value, fieldPath(path, "pathNot"), fromPatterns, allowCaptures); err != nil {
 			return err
 		}
 	}
@@ -338,7 +365,12 @@ func (validator configValidator) regularExpressions(node *jsonNode, path string)
 	return patterns, nil
 }
 
-func (validator configValidator) templates(node *jsonNode, path string, fromPatterns []*regexp.Regexp) error {
+func (validator configValidator) templates(
+	node *jsonNode,
+	path string,
+	fromPatterns []*regexp.Regexp,
+	allowCaptures bool,
+) error {
 	items, err := validator.nonEmptyStringArray(node, path)
 	if err != nil {
 		return err
@@ -357,6 +389,13 @@ func (validator configValidator) templates(node *jsonNode, path string, fromPatt
 				item,
 				templatePath,
 				fmt.Errorf("invalid regular expression %q: %w", item.text, compileErr),
+			)
+		}
+		if !allowCaptures && highestReference > 0 {
+			return validator.at(
+				item,
+				templatePath,
+				errors.New("capture references are not allowed with reachable: false"),
 			)
 		}
 		if highestReference == 0 {
@@ -386,6 +425,16 @@ func (validator configValidator) templates(node *jsonNode, path string, fromPatt
 	}
 
 	return nil
+}
+
+func (validator configValidator) boolean(node *jsonNode, path string) (bool, error) {
+	if err := validator.kind(node, path, jsonBoolean); err != nil {
+		return false, err
+	}
+
+	// parseJSON has already verified the document syntax, so a boolean node at
+	// its recorded offset starts with either 't' or 'f'.
+	return validator.data[node.offset] == 't', nil
 }
 
 func (validator configValidator) dependencyTypes(node *jsonNode, path string) error {
