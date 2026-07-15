@@ -91,6 +91,38 @@ func TestValidateComposesScanRulesAndBaseline(t *testing.T) {
 	}
 }
 
+func TestValidateReportsRequiredDependencyThroughPublicTypes(t *testing.T) {
+	t.Parallel()
+
+	configuration := &config.Config{Required: []config.RequiredRule{{
+		Name:     "app-requires-fmt",
+		Comment:  "import fmt",
+		Severity: config.SeverityError,
+		From:     config.From{Path: []string{`^app\.go$`}},
+		To: config.To{
+			Path:            []string{`^fmt$`},
+			DependencyTypes: []config.DependencyType{config.DependencyTypeStdlib},
+		},
+	}}}
+
+	result, err := cruiser.Validate(configuration, cruiser.Options{ScanRoot: createModule(t)})
+	if err != nil {
+		t.Fatalf("cruiser.Validate() error = %v", err)
+	}
+	if len(result.Violations) != 1 {
+		t.Fatalf("Violations = %#v, want one required violation", result.Violations)
+	}
+	violation := result.Violations[0]
+	if violation.Rule != "app-requires-fmt" ||
+		violation.Comment != "import fmt" ||
+		violation.Severity != config.SeverityError ||
+		violation.Kind != cruiser.ViolationKindRequired ||
+		violation.From.Path != "app.go" || violation.From.Line != 1 ||
+		violation.From.PackageName != "project" || violation.To != nil {
+		t.Errorf("required violation = %#v", violation)
+	}
+}
+
 func TestValidateRejectsInvalidProgrammaticConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -161,6 +193,22 @@ func TestValidateRejectsEmptyProgrammaticMatcherSlices(t *testing.T) {
 				Name: "rule", From: config.From{}, To: config.To{DependencyTypesNot: []config.DependencyType{}},
 			}}},
 			wantPath: "$.allowed[0].to.dependencyTypesNot",
+		},
+		{
+			name: "required from path",
+			configuration: config.Config{Required: []config.RequiredRule{{
+				Name: "rule", From: config.From{Path: []string{}},
+				To: config.To{Path: []string{`^fmt$`}},
+			}}},
+			wantPath: "$.required[0].from.path",
+		},
+		{
+			name: "required to dependencyTypes",
+			configuration: config.Config{Required: []config.RequiredRule{{
+				Name: "rule", From: config.From{},
+				To: config.To{DependencyTypes: []config.DependencyType{}},
+			}}},
+			wantPath: "$.required[0].to.dependencyTypes",
 		},
 	}
 

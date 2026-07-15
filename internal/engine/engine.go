@@ -12,9 +12,10 @@ import (
 )
 
 // Evaluate applies configuration to files and returns violations in a stable
-// order. Forbidden rules with ignore severity are not evaluated. A nil Allowed
-// slice disables fail-closed checking; a non-nil empty slice rejects every
-// dependency. An ignore AllowedSeverity also disables fail-closed checking.
+// order. Forbidden and required rules with ignore severity are not evaluated.
+// A nil Allowed slice disables fail-closed checking; a non-nil empty slice
+// rejects every dependency. An ignore AllowedSeverity also disables fail-closed
+// checking.
 func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, error) {
 	if configuration == nil {
 		return nil, errors.New("configuration is nil")
@@ -31,6 +32,10 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 		if err != nil {
 			return nil, err
 		}
+	}
+	requiredRules, err := compileRequiredRules(configuration.Required)
+	if err != nil {
+		return nil, err
 	}
 
 	orphans := findOrphans(files)
@@ -85,6 +90,35 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 		}
 	}
 
+	for _, rule := range requiredRules {
+		for _, file := range files {
+			captures, matched := rule.from.matches(file, orphans[file.Path])
+			if !matched {
+				continue
+			}
+			satisfied := false
+			for _, dependency := range file.Imports {
+				matched, matchErr := rule.to.matches(dependency, captures)
+				if matchErr != nil {
+					return nil, fmt.Errorf("required rule %q to: %w", rule.name, matchErr)
+				}
+				if matched {
+					satisfied = true
+					break
+				}
+			}
+			if !satisfied {
+				violations = append(violations, sourceViolation(
+					rule.name,
+					rule.comment,
+					rule.severity,
+					ViolationKindRequired,
+					file,
+				))
+			}
+		}
+	}
+
 	sortViolations(violations)
 
 	return violations, nil
@@ -100,20 +134,35 @@ func appendSourceViolations(
 		if _, matched := rule.from.matches(file, orphans[file.Path]); !matched {
 			continue
 		}
-		violations = append(violations, Violation{
-			Rule:     rule.name,
-			Comment:  rule.comment,
-			Severity: rule.severity,
-			Kind:     ViolationKindForbidden,
-			From: Source{
-				Path:        file.Path,
-				Line:        file.PackageLine,
-				PackageName: file.Package,
-			},
-		})
+		violations = append(violations, sourceViolation(
+			rule.name,
+			rule.comment,
+			rule.severity,
+			ViolationKindForbidden,
+			file,
+		))
 	}
 
 	return violations
+}
+
+func sourceViolation(
+	rule, comment string,
+	severity config.Severity,
+	kind ViolationKind,
+	file scanner.File,
+) Violation {
+	return Violation{
+		Rule:     rule,
+		Comment:  comment,
+		Severity: severity,
+		Kind:     kind,
+		From: Source{
+			Path:        file.Path,
+			Line:        file.PackageLine,
+			PackageName: file.Package,
+		},
+	}
 }
 
 func isAllowed(

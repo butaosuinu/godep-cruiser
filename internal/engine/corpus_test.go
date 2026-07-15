@@ -110,6 +110,17 @@ func corpusConfigurations() map[string]config.Config {
 				To: config.To{},
 			}},
 		},
+		"required-dependency": {
+			Required: []config.RequiredRule{{
+				Name:     "handler-requires-logging",
+				Severity: config.SeverityError,
+				From:     config.From{Path: []string{`^internal/handler/`}},
+				To: config.To{
+					Path:            []string{`^internal/logging$`},
+					DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
+				},
+			}},
+		},
 		"stdlib-denylist-exception": {
 			Forbidden: []config.ForbiddenRule{{
 				Name:     "core-stdlib-denylist",

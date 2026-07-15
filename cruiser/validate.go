@@ -91,6 +91,15 @@ func validateProgrammaticMatcherSlices(configuration *config.Config) error {
 			return err
 		}
 	}
+	for index, rule := range configuration.Required {
+		prefix := fmt.Sprintf("$.required[%d]", index)
+		if err := validateFromSlices(rule.From, prefix+".from"); err != nil {
+			return err
+		}
+		if err := validateToSlices(rule.To, prefix+".to"); err != nil {
+			return err
+		}
+	}
 	for index, rule := range configuration.Allowed {
 		prefix := fmt.Sprintf("$.allowed[%d]", index)
 		if err := validateFromSlices(rule.From, prefix+".from"); err != nil {

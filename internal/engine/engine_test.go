@@ -202,6 +202,124 @@ func TestCaptureExpansion(t *testing.T) {
 	}
 }
 
+func TestRequiredDependencies(t *testing.T) {
+	t.Parallel()
+
+	files := []scanner.File{
+		{
+			Path:        "internal/features/alpha/feature.go",
+			Package:     "feature",
+			PackageLine: 2,
+			Imports: []scanner.Import{
+				{Path: "fmt", ResolvedPath: "fmt", Type: scanner.DependencyTypeStdlib, Line: 4},
+				{
+					Path:         "example.com/project/internal/shared/alpha",
+					ResolvedPath: "internal/shared/alpha",
+					Type:         scanner.DependencyTypeLocal,
+					Line:         5,
+				},
+			},
+		},
+		{
+			Path:        "internal/features/beta/feature.go",
+			Package:     "feature",
+			PackageLine: 3,
+			Imports: []scanner.Import{
+				{Path: "fmt", ResolvedPath: "fmt", Type: scanner.DependencyTypeStdlib, Line: 5},
+				{Path: "os", ResolvedPath: "os", Type: scanner.DependencyTypeStdlib, Line: 6},
+			},
+		},
+		{
+			Path:        "internal/features/gamma/feature.go",
+			Package:     "feature",
+			PackageLine: 7,
+		},
+		{
+			Path:        "internal/other/other.go",
+			Package:     "other",
+			PackageLine: 1,
+		},
+	}
+	configuration := config.Config{Required: []config.RequiredRule{
+		{
+			Name:     "feature-requires-shared",
+			Comment:  "import the feature's shared package",
+			Severity: config.SeverityError,
+			From: config.From{
+				Path:        []string{`^internal/features/([^/]+)/`},
+				PackageName: []string{`^feature$`},
+			},
+			To: config.To{
+				Path:            []string{`^internal/shared/$1$`},
+				DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
+			},
+		},
+		{
+			Name:     "ignored-required",
+			Severity: config.SeverityIgnore,
+			From:     config.From{Path: []string{"("}},
+			To:       config.To{},
+		},
+	}}
+
+	got, err := Evaluate(&configuration, files)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Evaluate() violations = %#v, want beta and gamma", got)
+	}
+	wantPaths := []string{
+		"internal/features/beta/feature.go",
+		"internal/features/gamma/feature.go",
+	}
+	wantLines := []int{3, 7}
+	for index, violation := range got {
+		if violation.Rule != "feature-requires-shared" ||
+			violation.Comment != "import the feature's shared package" ||
+			violation.Severity != config.SeverityError ||
+			violation.Kind != ViolationKindRequired ||
+			violation.From.Path != wantPaths[index] ||
+			violation.From.Line != wantLines[index] ||
+			violation.From.PackageName != "feature" ||
+			violation.To != nil {
+			t.Errorf("required violation[%d] = %#v", index, violation)
+		}
+	}
+}
+
+func TestRequiredCatchAllUsesDefaultSeverity(t *testing.T) {
+	t.Parallel()
+
+	configuration := config.Config{Required: []config.RequiredRule{{
+		Name: "require-stdlib",
+		From: config.From{},
+		To: config.To{
+			DependencyTypes: []config.DependencyType{config.DependencyTypeStdlib},
+		},
+	}}}
+	files := []scanner.File{
+		{
+			Path:        "with.go",
+			Package:     "sample",
+			PackageLine: 1,
+			Imports: []scanner.Import{{
+				Path: "fmt", ResolvedPath: "fmt", Type: scanner.DependencyTypeStdlib, Line: 3,
+			}},
+		},
+		{Path: "without.go", Package: "sample", PackageLine: 2},
+	}
+
+	got, err := Evaluate(&configuration, files)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if len(got) != 1 || got[0].From.Path != "without.go" ||
+		got[0].Severity != config.SeverityWarn || got[0].Kind != ViolationKindRequired {
+		t.Errorf("Evaluate() violations = %#v, want one warn required violation for without.go", got)
+	}
+}
+
 func TestPackageNameDispatch(t *testing.T) {
 	t.Parallel()
 
@@ -508,6 +626,22 @@ func TestEvaluateRejectsInvalidProgrammaticConfiguration(t *testing.T) {
 				Name: "invalid-capture", From: config.From{}, To: config.To{Path: []string{`$1`}},
 			}}},
 			wantError: "unavailable",
+		},
+		{
+			name: "invalid required from regexp",
+			configuration: &config.Config{Required: []config.RequiredRule{{
+				Name: "invalid-required-from", From: config.From{Path: []string{"("}},
+				To: config.To{Path: []string{`^fmt$`}},
+			}}},
+			wantError: "required[0]",
+		},
+		{
+			name: "invalid required to regexp",
+			configuration: &config.Config{Required: []config.RequiredRule{{
+				Name: "invalid-required-to", From: config.From{},
+				To: config.To{Path: []string{"("}},
+			}}},
+			wantError: "required rule",
 		},
 	}
 

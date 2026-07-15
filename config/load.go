@@ -86,6 +86,11 @@ func parse(source string, data []byte) (*Config, error) {
 			result.Forbidden[index].Severity = SeverityWarn
 		}
 	}
+	for index := range result.Required {
+		if result.Required[index].Severity == "" {
+			result.Required[index].Severity = SeverityWarn
+		}
+	}
 	if result.AllowedSeverity == "" {
 		result.AllowedSeverity = SeverityWarn
 	}

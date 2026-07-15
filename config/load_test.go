@@ -43,6 +43,25 @@ func TestLoadValidConfiguration(t *testing.T) {
     {"name": "info", "severity": "info", "from": {}, "to": {}},
     {"name": "ignore", "severity": "ignore", "from": {}, "to": {}}
   ],
+  "required": [
+    {
+      "name": "require-feature-shared",
+      "comment": "each feature imports its shared package",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/features/([^/]+)/"],
+        "pathNot": ["_test\\.go$"],
+        "packageName": ["^feature$"]
+      },
+      "to": {
+        "path": ["^internal/shared/$1$"],
+        "pathNot": ["/legacy$"],
+        "dependencyTypes": ["local"],
+        "dependencyTypesNot": ["unresolved"]
+      }
+    },
+    {"name": "require-stdlib", "from": {}, "to": {"dependencyTypes": ["stdlib"]}}
+  ],
   "allowed": [
     {
       "name": "allow-local",
@@ -95,6 +114,22 @@ func TestLoadValidConfiguration(t *testing.T) {
 						allowed.To.DependencyTypes[1] != DependencyTypeLocal {
 						t.Errorf("allowed to fields not loaded: %#v", allowed.To)
 					}
+				}
+				if len(got.Required) != 2 {
+					t.Fatalf("len(Required) = %d, want 2", len(got.Required))
+				}
+				required := got.Required[0]
+				if required.Name != "require-feature-shared" ||
+					required.Comment != "each feature imports its shared package" ||
+					required.Severity != SeverityError ||
+					len(required.From.Path) != 1 || len(required.From.PathNot) != 1 ||
+					len(required.From.PackageName) != 1 || required.From.Orphan != nil ||
+					len(required.To.Path) != 1 || len(required.To.PathNot) != 1 ||
+					len(required.To.DependencyTypes) != 1 || len(required.To.DependencyTypesNot) != 1 {
+					t.Errorf("required fields not loaded: %#v", required)
+				}
+				if got.Required[1].Severity != SeverityWarn {
+					t.Errorf("default required severity = %q, want %q", got.Required[1].Severity, SeverityWarn)
 				}
 				if got.AllowedSeverity != SeverityInfo {
 					t.Errorf("AllowedSeverity = %q, want %q", got.AllowedSeverity, SeverityInfo)
@@ -180,20 +215,26 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "malformed JSON", input: `{"forbidden":`, wantText: "unexpected EOF"},
 		{name: "YAML is not accepted", input: "forbidden:\n  - name: nope", wantText: "invalid character"},
 		{name: "root must be object", input: `[]`, wantPath: "$", wantText: "must be an object"},
-		{name: "unknown top-level field", input: `{"required":[]}`, wantPath: "$.required", wantText: `unknown field "required"`},
+		{name: "unknown top-level field", input: `{"scope":"module"}`, wantPath: "$.scope", wantText: `unknown field "scope"`},
 		{name: "unknown field JSON path is quoted", input: `{"bad.field":true}`, wantPath: `$["bad.field"]`, wantText: `unknown field "bad.field"`},
 		{name: "duplicate top-level field", input: `{"allowed":[],"allowed":[]}`, wantPath: "$.allowed", wantText: `duplicate field "allowed"`},
 		{name: "duplicate forbidden rule name", input: `{"forbidden":[{"name":"dup","from":{},"to":{}},{"name":"dup","from":{},"to":{}}]}`, wantPath: "$.forbidden[1].name", wantText: `duplicate rule name "dup"`},
+		{name: "duplicate required rule name", input: `{"required":[{"name":"dup","from":{},"to":{"path":["a"]}},{"name":"dup","from":{},"to":{"path":["b"]}}]}`, wantPath: "$.required[1].name", wantText: `duplicate rule name "dup"`},
+		{name: "forbidden and required names collide", input: `{"forbidden":[{"name":"dup","from":{},"to":{}}],"required":[{"name":"dup","from":{},"to":{"path":["a"]}}]}`, wantPath: "$.required[0].name", wantText: `duplicate rule name "dup"`},
 		{name: "duplicate allowed rule name", input: `{"allowed":[{"name":"dup","from":{},"to":{}},{"name":"dup","from":{},"to":{}}]}`, wantPath: "$.allowed[1].name", wantText: `duplicate rule name "dup"`},
 		{name: "reserved forbidden rule name", input: `{"forbidden":[{"name":"not-in-allowed","from":{},"to":{}}]}`, wantPath: "$.forbidden[0].name", wantText: `rule name "not-in-allowed" is reserved`},
+		{name: "reserved required rule name", input: `{"required":[{"name":"not-in-allowed","from":{},"to":{"path":["a"]}}]}`, wantPath: "$.required[0].name", wantText: `rule name "not-in-allowed" is reserved`},
 		{name: "reserved allowed rule name", input: `{"allowed":[{"name":"not-in-allowed","from":{},"to":{}}]}`, wantPath: "$.allowed[0].name", wantText: `rule name "not-in-allowed" is reserved`},
 		{name: "forbidden must be array", input: `{"forbidden":null}`, wantPath: "$.forbidden", wantText: "must be an array"},
+		{name: "required must be array", input: `{"required":null}`, wantPath: "$.required", wantText: "must be an array"},
 		{name: "empty rule", input: `{"forbidden":[{}]}`, wantPath: "$.forbidden[0]", wantText: `missing required field "name"`},
 		{name: "empty name", input: validRule(`"name":""`), wantPath: "$.forbidden[0].name", wantText: "must not be empty"},
 		{name: "missing from", input: `{"forbidden":[{"name":"x","to":{}}]}`, wantPath: "$.forbidden[0]", wantText: `missing required field "from"`},
 		{name: "missing to", input: `{"forbidden":[{"name":"x","from":{}}]}`, wantPath: "$.forbidden[0]", wantText: `missing required field "to"`},
 		{name: "unknown rule field", input: validRule(`"scope":"module"`), wantPath: "$.forbidden[0].scope", wantText: `unknown field "scope"`},
 		{name: "allowed rule severity is unsupported", input: `{"allowed":[{"name":"x","severity":"error","from":{},"to":{}}]}`, wantPath: "$.allowed[0].severity", wantText: `unknown field "severity"`},
+		{name: "required to must define a condition", input: `{"required":[{"name":"x","from":{},"to":{}}]}`, wantPath: "$.required[0].to", wantText: "must define at least one condition"},
+		{name: "required from orphan is unsupported", input: `{"required":[{"name":"x","from":{"orphan":false},"to":{"path":["a"]}}]}`, wantPath: "$.required[0].from.orphan", wantText: `unknown field "orphan"`},
 		{name: "unknown from field", input: validRule(`"from":{"reachable":true}`), wantPath: "$.forbidden[0].from.reachable", wantText: `unknown field "reachable"`},
 		{name: "unknown to field", input: validRule(`"to":{"couldNotResolve":true}`), wantPath: "$.forbidden[0].to.couldNotResolve", wantText: `unknown field "couldNotResolve"`},
 		{name: "path must be array", input: validRule(`"from":{"path":"^cmd/"}`), wantPath: "$.forbidden[0].from.path", wantText: "must be an array"},
@@ -209,6 +250,8 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "invalid severity", input: validRule(`"severity":"fatal"`), wantPath: "$.forbidden[0].severity", wantText: "unknown severity"},
 		{name: "invalid allowed severity", input: `{"allowedSeverity":"fatal"}`, wantPath: "$.allowedSeverity", wantText: "unknown severity"},
 		{name: "capture without from path", input: validRule(`"to":{"path":["^internal/$1/"]}`), wantPath: "$.forbidden[0].to.path[0]", wantText: "requires from.path"},
+		{name: "required capture without from path", input: `{"required":[{"name":"x","from":{},"to":{"path":["^internal/$1/"]}}]}`, wantPath: "$.required[0].to.path[0]", wantText: "requires from.path"},
+		{name: "required capture exceeds group count", input: `{"required":[{"name":"x","from":{"path":["^cmd/([^/]+)/"]},"to":{"path":["^internal/$2/"]}}]}`, wantPath: "$.required[0].to.path[0]", wantText: "exceeds the 1 groups"},
 		{name: "capture exceeds group count", input: captureRule(`"^cmd/([^/]+)/"`, `"^internal/$2/"`), wantPath: "$.forbidden[0].to.path[0]", wantText: "exceeds the 1 groups"},
 		{name: "every source pattern must supply capture", input: captureRule(`"^cmd/([^/]+)/","^pkg/"`, `"^internal/$1/"`), wantPath: "$.forbidden[0].to.path[0]", wantText: "from.path[1]"},
 		{name: "capture zero is invalid", input: captureRule(`"^cmd/(.+)/"`, `"^internal/$0/"`), wantPath: "$.forbidden[0].to.path[0]", wantText: "references start at $1"},
@@ -264,6 +307,34 @@ func TestLoadReportsExactRegexPosition(t *testing.T) {
 	}
 	if configErr.Line != 5 || configErr.Column != 16 {
 		t.Errorf("position = %d:%d, want 5:16", configErr.Line, configErr.Column)
+	}
+}
+
+func TestLoadReportsExactRequiredCapturePosition(t *testing.T) {
+	t.Parallel()
+
+	input := `{
+  "required": [{
+    "name": "needs-capture",
+    "from": {},
+    "to": {
+      "path": ["^internal/$1/"]
+    }
+  }]
+}`
+	_, err := Parse([]byte(input))
+	var configErr *Error
+	if !errors.As(err, &configErr) {
+		t.Fatalf("Parse() error = %v, want *config.Error", err)
+	}
+	if configErr.Path != "$.required[0].to.path[0]" ||
+		configErr.Line != 6 || configErr.Column != 16 {
+		t.Errorf(
+			"required capture error = path %q at %d:%d, want $.required[0].to.path[0] at 6:16",
+			configErr.Path,
+			configErr.Line,
+			configErr.Column,
+		)
 	}
 }
 
@@ -421,10 +492,12 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		properties map[string]json.RawMessage
 		want       []string
 	}{
-		{name: "configuration", properties: schema.Properties, want: []string{"forbidden", "allowed", "allowedSeverity"}},
+		{name: "configuration", properties: schema.Properties, want: []string{"forbidden", "required", "allowed", "allowedSeverity"}},
 		{name: "from", properties: schema.Definitions["from"].Properties, want: []string{"path", "pathNot", "orphan", "packageName"}},
+		{name: "required from", properties: schema.Definitions["requiredFrom"].Properties, want: []string{"path", "pathNot", "packageName"}},
 		{name: "to", properties: schema.Definitions["to"].Properties, want: []string{"path", "pathNot", "dependencyTypes", "dependencyTypesNot"}},
 		{name: "forbidden rule", properties: schema.Definitions["forbiddenRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
+		{name: "required rule", properties: schema.Definitions["requiredRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
 		{name: "allowed rule", properties: schema.Definitions["allowedRule"].Properties, want: []string{"name", "comment", "from", "to"}},
 	}
 	for _, test := range tests {
@@ -470,7 +543,7 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 	if ruleName.Type != "string" || ruleName.MinLength != 1 || ruleName.Not.Const != "not-in-allowed" {
 		t.Errorf("ruleName schema = %#v, want a non-empty string excluding not-in-allowed", ruleName)
 	}
-	for _, definition := range []string{"forbiddenRule", "allowedRule"} {
+	for _, definition := range []string{"forbiddenRule", "requiredRule", "allowedRule"} {
 		var nameProperty struct {
 			Reference string `json:"$ref"`
 		}
@@ -480,6 +553,17 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		if nameProperty.Reference != "#/$defs/ruleName" {
 			t.Errorf("%s name reference = %q, want #/$defs/ruleName", definition, nameProperty.Reference)
 		}
+	}
+
+	var requiredTo struct {
+		Reference     string `json:"$ref"`
+		MinProperties int    `json:"minProperties"`
+	}
+	if err := json.Unmarshal(schema.Definitions["requiredRule"].Properties["to"], &requiredTo); err != nil {
+		t.Fatalf("decode requiredRule to property: %v", err)
+	}
+	if requiredTo.Reference != "#/$defs/to" || requiredTo.MinProperties != 1 {
+		t.Errorf("requiredRule to schema = %#v, want non-empty #/$defs/to", requiredTo)
 	}
 }
 

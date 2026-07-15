@@ -18,6 +18,12 @@ import (
 
 const goldenFilename = "violations.golden.json"
 
+var sourceOnlyRuleNames = map[string]struct{}{
+	"handler-requires-logging": {},
+	"no-orphans":               {},
+	"package-main-placement":   {},
+}
+
 // Location identifies a module-relative source location.
 type Location struct {
 	Path string `json:"path"`
@@ -32,7 +38,8 @@ type Dependency struct {
 }
 
 // ExpectedViolation is the stable projection compared by future engine tests.
-// To is absent for source-only violations such as orphan and package-name rules.
+// To is absent for source-only violations such as orphan, package-name, and
+// required rules.
 type ExpectedViolation struct {
 	Rule     string      `json:"rule"`
 	Severity string      `json:"severity"`
@@ -277,18 +284,16 @@ func validateViolation(moduleDir string, violation ExpectedViolation) error {
 	if err := validateLocation(moduleDir, violation.From); err != nil {
 		return err
 	}
-	switch violation.Rule {
-	case "package-main-placement", "no-orphans":
+	if _, sourceOnly := sourceOnlyRuleNames[violation.Rule]; sourceOnly {
 		if violation.To != nil {
 			return fmt.Errorf("source-only rule %q must not set to", violation.Rule)
 		}
 		return nil
-	default:
-		if violation.To == nil {
-			return fmt.Errorf("edge rule %q must set to", violation.Rule)
-		}
-		return validateDependency(*violation.To)
 	}
+	if violation.To == nil {
+		return fmt.Errorf("edge rule %q must set to", violation.Rule)
+	}
+	return validateDependency(*violation.To)
 }
 
 func validatePositiveControl(moduleDir string, control PositiveControl) error {

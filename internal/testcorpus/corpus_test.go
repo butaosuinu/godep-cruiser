@@ -32,6 +32,7 @@ func TestViolationCorpus(t *testing.T) {
 		"layer-direction",
 		"orphan-file",
 		"package-main-placement",
+		"required-dependency",
 		"stdlib-denylist-exception",
 		"stdlib-only-tree",
 		"third-party-in-core",
@@ -722,6 +723,15 @@ func TestValidateViolationRuleShape(t *testing.T) {
 			name:      "orphan rule rejects import target",
 			violation: ExpectedViolation{Rule: "no-orphans", Severity: "error", From: location, To: edge},
 			wantError: `source-only rule "no-orphans" must not set to`,
+		},
+		{
+			name:      "required rule stays source-only",
+			violation: ExpectedViolation{Rule: "handler-requires-logging", Severity: "error", From: location},
+		},
+		{
+			name:      "required rule rejects import target",
+			violation: ExpectedViolation{Rule: "handler-requires-logging", Severity: "error", From: location, To: edge},
+			wantError: `source-only rule "handler-requires-logging" must not set to`,
 		},
 	}
 

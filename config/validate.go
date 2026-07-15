@@ -15,19 +15,38 @@ type configValidator struct {
 
 const reservedAllowedViolationRuleName = "not-in-allowed"
 
+type ruleKind uint8
+
+const (
+	forbiddenRuleKind ruleKind = iota
+	requiredRuleKind
+	allowedRuleKind
+)
+
 func (validator configValidator) validate(root *jsonNode) error {
-	fields, err := validator.object(root, "$", "forbidden", "allowed", "allowedSeverity")
+	fields, err := validator.object(root, "$", "forbidden", "required", "allowed", "allowedSeverity")
 	if err != nil {
 		return err
 	}
 
+	constraintNames := make(map[string]struct{})
 	if forbidden, ok := fields["forbidden"]; ok {
-		if err := validator.rules(forbidden.value, "$.forbidden", true); err != nil {
+		if err := validator.rules(forbidden.value, "$.forbidden", forbiddenRuleKind, constraintNames); err != nil {
+			return err
+		}
+	}
+	if required, ok := fields["required"]; ok {
+		if err := validator.rules(required.value, "$.required", requiredRuleKind, constraintNames); err != nil {
 			return err
 		}
 	}
 	if allowed, ok := fields["allowed"]; ok {
-		if err := validator.rules(allowed.value, "$.allowed", false); err != nil {
+		if err := validator.rules(
+			allowed.value,
+			"$.allowed",
+			allowedRuleKind,
+			make(map[string]struct{}),
+		); err != nil {
 			return err
 		}
 	}
@@ -40,15 +59,19 @@ func (validator configValidator) validate(root *jsonNode) error {
 	return nil
 }
 
-func (validator configValidator) rules(node *jsonNode, path string, forbidden bool) error {
+func (validator configValidator) rules(
+	node *jsonNode,
+	path string,
+	kind ruleKind,
+	names map[string]struct{},
+) error {
 	if err := validator.kind(node, path, jsonArray); err != nil {
 		return err
 	}
 
-	names := make(map[string]struct{}, len(node.items))
 	for index, item := range node.items {
 		rulePath := indexedPath(path, index)
-		if err := validator.rule(item, rulePath, forbidden); err != nil {
+		if err := validator.rule(item, rulePath, kind); err != nil {
 			return err
 		}
 		var nameNode *jsonNode
@@ -68,9 +91,9 @@ func (validator configValidator) rules(node *jsonNode, path string, forbidden bo
 	return nil
 }
 
-func (validator configValidator) rule(node *jsonNode, path string, forbidden bool) error {
+func (validator configValidator) rule(node *jsonNode, path string, kind ruleKind) error {
 	allowedFields := []string{"name", "comment", "from", "to"}
-	if forbidden {
+	if kind != allowedRuleKind {
 		allowedFields = append(allowedFields, "severity")
 	}
 	fields, err := validator.object(node, path, allowedFields...)
@@ -112,19 +135,36 @@ func (validator configValidator) rule(node *jsonNode, path string, forbidden boo
 		}
 	}
 
-	fromPatterns, err := validator.from(from.value, fieldPath(path, "from"))
+	fromPatterns, err := validator.from(
+		from.value,
+		fieldPath(path, "from"),
+		kind != requiredRuleKind,
+	)
 	if err != nil {
 		return err
 	}
-	if err := validator.to(to.value, fieldPath(path, "to"), fromPatterns); err != nil {
+	if err := validator.to(
+		to.value,
+		fieldPath(path, "to"),
+		fromPatterns,
+		kind == requiredRuleKind,
+	); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (validator configValidator) from(node *jsonNode, path string) ([]*regexp.Regexp, error) {
-	fields, err := validator.object(node, path, "path", "pathNot", "orphan", "packageName")
+func (validator configValidator) from(
+	node *jsonNode,
+	path string,
+	allowOrphan bool,
+) ([]*regexp.Regexp, error) {
+	allowedFields := []string{"path", "pathNot", "packageName"}
+	if allowOrphan {
+		allowedFields = append(allowedFields, "orphan")
+	}
+	fields, err := validator.object(node, path, allowedFields...)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +195,12 @@ func (validator configValidator) from(node *jsonNode, path string) ([]*regexp.Re
 	return fromPatterns, nil
 }
 
-func (validator configValidator) to(node *jsonNode, path string, fromPatterns []*regexp.Regexp) error {
+func (validator configValidator) to(
+	node *jsonNode,
+	path string,
+	fromPatterns []*regexp.Regexp,
+	requireCondition bool,
+) error {
 	fields, err := validator.object(
 		node,
 		path,
@@ -166,6 +211,9 @@ func (validator configValidator) to(node *jsonNode, path string, fromPatterns []
 	)
 	if err != nil {
 		return err
+	}
+	if requireCondition && len(fields) == 0 {
+		return validator.at(node, path, errors.New("must define at least one condition"))
 	}
 
 	if member, ok := fields["path"]; ok {

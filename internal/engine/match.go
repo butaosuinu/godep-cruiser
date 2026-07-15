@@ -37,6 +37,14 @@ type compiledAllowedRule struct {
 	to   toMatcher
 }
 
+type compiledRequiredRule struct {
+	name     string
+	comment  string
+	severity config.Severity
+	from     fromMatcher
+	to       toMatcher
+}
+
 func compileForbiddenRules(rules []config.ForbiddenRule) ([]compiledForbiddenRule, error) {
 	compiled := make([]compiledForbiddenRule, 0, len(rules))
 	for index, rule := range rules {
@@ -72,6 +80,29 @@ func compileAllowedRules(rules []config.AllowedRule) ([]compiledAllowedRule, err
 			name: rule.Name,
 			from: from,
 			to:   compileTo(rule.To),
+		})
+	}
+
+	return compiled, nil
+}
+
+func compileRequiredRules(rules []config.RequiredRule) ([]compiledRequiredRule, error) {
+	compiled := make([]compiledRequiredRule, 0, len(rules))
+	for index, rule := range rules {
+		severity := effectiveSeverity(rule.Severity)
+		if severity == config.SeverityIgnore {
+			continue
+		}
+		from, err := compileFrom(rule.From)
+		if err != nil {
+			return nil, fmt.Errorf("required[%d] %q: %w", index, rule.Name, err)
+		}
+		compiled = append(compiled, compiledRequiredRule{
+			name:     rule.Name,
+			comment:  rule.Comment,
+			severity: severity,
+			from:     from,
+			to:       compileTo(rule.To),
 		})
 	}
 
