@@ -4,10 +4,10 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"path"
 	"slices"
 
 	"github.com/butaosuinu/godep-cruiser/config"
+	"github.com/butaosuinu/godep-cruiser/internal/graph"
 	"github.com/butaosuinu/godep-cruiser/internal/scanner"
 )
 
@@ -38,15 +38,16 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 		return nil, err
 	}
 
-	orphans := findOrphans(files)
+	packageGraph := graph.Build(files)
+	factsByPath := collectFileFacts(files, packageGraph)
 	violations := make([]Violation, 0)
 	for _, rule := range forbiddenRules {
 		if rule.sourceOnly {
-			violations = appendSourceViolations(violations, rule, files, orphans)
+			violations = appendSourceViolations(violations, rule, files, factsByPath)
 			continue
 		}
 		for _, file := range files {
-			captures, matched := rule.from.matches(file, orphans[file.Path])
+			captures, matched := rule.from.matches(file, factsByPath[file.Path])
 			if !matched {
 				continue
 			}
@@ -72,7 +73,7 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 	if configuration.Allowed != nil && allowedSeverity != config.SeverityIgnore {
 		for _, file := range files {
 			for _, dependency := range file.Imports {
-				allowed, matchErr := isAllowed(allowedRules, file, dependency, orphans[file.Path])
+				allowed, matchErr := isAllowed(allowedRules, file, dependency, factsByPath[file.Path])
 				if matchErr != nil {
 					return nil, matchErr
 				}
@@ -92,7 +93,7 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 
 	for _, rule := range requiredRules {
 		for _, file := range files {
-			captures, matched := rule.from.matches(file, orphans[file.Path])
+			captures, matched := rule.from.matches(file, factsByPath[file.Path])
 			if !matched {
 				continue
 			}
@@ -128,10 +129,10 @@ func appendSourceViolations(
 	violations []Violation,
 	rule compiledForbiddenRule,
 	files []scanner.File,
-	orphans map[string]bool,
+	factsByPath map[string]fileFacts,
 ) []Violation {
 	for _, file := range files {
-		if _, matched := rule.from.matches(file, orphans[file.Path]); !matched {
+		if _, matched := rule.from.matches(file, factsByPath[file.Path]); !matched {
 			continue
 		}
 		violations = append(violations, sourceViolation(
@@ -169,10 +170,10 @@ func isAllowed(
 	rules []compiledAllowedRule,
 	file scanner.File,
 	dependency scanner.Import,
-	orphan bool,
+	facts fileFacts,
 ) (bool, error) {
 	for _, rule := range rules {
-		captures, matched := rule.from.matches(file, orphan)
+		captures, matched := rule.from.matches(file, facts)
 		if !matched {
 			continue
 		}
@@ -213,23 +214,26 @@ func edgeViolation(
 	}
 }
 
-func findOrphans(files []scanner.File) map[string]bool {
-	importedPackages := make(map[string]struct{})
-	for _, file := range files {
-		for _, dependency := range file.Imports {
-			if dependency.Type == scanner.DependencyTypeLocal && dependency.ResolvedPath != "" {
-				importedPackages[path.Clean(dependency.ResolvedPath)] = struct{}{}
-			}
-		}
-	}
-
+func findOrphans(files []scanner.File, packageGraph graph.Graph) map[string]bool {
 	orphans := make(map[string]bool, len(files))
 	for _, file := range files {
-		_, imported := importedPackages[path.Dir(file.Path)]
-		orphans[file.Path] = len(file.Imports) == 0 && !imported
+		orphans[file.Path] = len(file.Imports) == 0 && !packageGraph.IsImported(file.PackagePath)
 	}
 
 	return orphans
+}
+
+func collectFileFacts(files []scanner.File, packageGraph graph.Graph) map[string]fileFacts {
+	orphans := findOrphans(files, packageGraph)
+	factsByPath := make(map[string]fileFacts, len(files))
+	for _, file := range files {
+		factsByPath[file.Path] = fileFacts{
+			orphan:             orphans[file.Path],
+			numberOfDependents: packageGraph.FanIn(file.PackagePath),
+		}
+	}
+
+	return factsByPath
 }
 
 func sortViolations(violations []Violation) {

@@ -39,11 +39,30 @@ func TestScanRecordsEveryGoFile(t *testing.T) {
 		"vendorized/keep.go",
 	}
 	gotPaths := make([]string, 0, len(files))
+	gotPackagePaths := make([]string, 0, len(files))
 	for _, file := range files {
 		gotPaths = append(gotPaths, file.Path)
+		gotPackagePaths = append(gotPackagePaths, file.PackagePath)
 	}
 	if !slices.Equal(gotPaths, wantPaths) {
 		t.Fatalf("Scan() paths = %q, want %q", gotPaths, wantPaths)
+	}
+	wantPackagePaths := []string{
+		".",
+		".",
+		"dot.dir",
+		".",
+		".",
+		"nested",
+		".",
+		".",
+		".",
+		"testdatax",
+		"under_score",
+		"vendorized",
+	}
+	if !slices.Equal(gotPackagePaths, wantPackagePaths) {
+		t.Fatalf("Scan() package paths = %q, want %q", gotPackagePaths, wantPackagePaths)
 	}
 
 	tests := []struct {
@@ -134,6 +153,67 @@ func TestScanRecordsEveryGoFile(t *testing.T) {
 	}
 }
 
+func TestScanWithModulePathOnlyUsesScanRootAsIdentityBase(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "nested", "source.go"), "package nested\n")
+	files, err := Scan(root, mustResolver(t, "example.com/fixture"))
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "nested/source.go" || files[0].PackagePath != "nested" {
+		t.Errorf(
+			"Scan() files = %#v, want Path nested/source.go and PackagePath nested",
+			files,
+		)
+	}
+}
+
+func TestScanUsesGoModRootForSubrootIdentity(t *testing.T) {
+	t.Parallel()
+
+	moduleRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(moduleRoot, "go.mod"), "module example.com/fixture\n")
+	writeTestFile(t, filepath.Join(moduleRoot, "internal", "app", "app.go"), `package app
+
+import "example.com/fixture/internal/core"
+`)
+	writeTestFile(t, filepath.Join(moduleRoot, "internal", "core", "core.go"), "package core\n")
+	resolver, err := NewResolverFromGoMod(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatalf("NewResolverFromGoMod() error = %v", err)
+	}
+	files, err := Scan(filepath.Join(moduleRoot, "internal"), resolver)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	tests := []struct {
+		name            string
+		path            string
+		wantPackagePath string
+	}{
+		{name: "app", path: "app/app.go", wantPackagePath: "internal/app"},
+		{name: "core", path: "core/core.go", wantPackagePath: "internal/core"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			file, ok := findFile(files, test.path)
+			if !ok {
+				t.Fatalf("Scan() has no file %q", test.path)
+			}
+			if file.PackagePath != test.wantPackagePath {
+				t.Errorf("file %q PackagePath = %q, want %q", test.path, file.PackagePath, test.wantPackagePath)
+			}
+		})
+	}
+	app, _ := findFile(files, "app/app.go")
+	if len(app.Imports) != 1 || app.Imports[0].ResolvedPath != "internal/core" {
+		t.Errorf("app imports = %#v, want module-relative internal/core", app.Imports)
+	}
+}
+
 func TestScanSkipsDirectories(t *testing.T) {
 	t.Parallel()
 
@@ -213,8 +293,51 @@ func TestScanFollowsExplicitSymlinkRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scan() error = %v", err)
 	}
-	if len(files) != 1 || files[0].Path != "source.go" {
-		t.Errorf("Scan() files = %#v, want source.go", files)
+	if len(files) != 1 || files[0].Path != "source.go" || files[0].PackagePath != "." {
+		t.Errorf("Scan() files = %#v, want source.go in root package", files)
+	}
+}
+
+func TestScanUsesCanonicalModuleRootForSymlinkedSubroot(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	moduleRoot := filepath.Join(workspace, "module")
+	writeTestFile(t, filepath.Join(moduleRoot, "go.mod"), "module example.com/fixture\n")
+	writeTestFile(t, filepath.Join(moduleRoot, "internal", "app", "source.go"), "package app\n")
+
+	scanRoot := filepath.Join(workspace, "scan-root")
+	if err := os.Symlink(filepath.Join("module", "internal"), scanRoot); err != nil {
+		t.Skipf("create directory symlink: %v", err)
+	}
+	resolver, err := NewResolverFromGoMod(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatalf("NewResolverFromGoMod() error = %v", err)
+	}
+	files, err := Scan(scanRoot, resolver)
+	if err != nil {
+		t.Fatalf("Scan() error = %v", err)
+	}
+	if len(files) != 1 || files[0].Path != "app/source.go" || files[0].PackagePath != "internal/app" {
+		t.Errorf("Scan() files = %#v, want app/source.go with PackagePath internal/app", files)
+	}
+}
+
+func TestScanRejectsRootOutsideResolverModule(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	moduleRoot := filepath.Join(workspace, "module")
+	writeTestFile(t, filepath.Join(moduleRoot, "go.mod"), "module example.com/fixture\n")
+	outsideRoot := filepath.Join(workspace, "outside")
+	writeTestFile(t, filepath.Join(outsideRoot, "source.go"), "package outside\n")
+	resolver, err := NewResolverFromGoMod(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatalf("NewResolverFromGoMod() error = %v", err)
+	}
+	_, err = Scan(outsideRoot, resolver)
+	if err == nil || !strings.Contains(err.Error(), "outside module root") {
+		t.Errorf("Scan() error = %v, want outside-module-root error", err)
 	}
 }
 

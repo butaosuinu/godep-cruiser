@@ -15,6 +15,11 @@ type fromMatcher struct {
 	packageName []*regexp.Regexp
 }
 
+type fileFacts struct {
+	orphan             bool
+	numberOfDependents int
+}
+
 type toMatcher struct {
 	path               []string
 	pathNot            []string
@@ -153,7 +158,7 @@ func compileTo(to config.To) toMatcher {
 	}
 }
 
-func (matcher fromMatcher) matches(file scanner.File, orphan bool) ([]string, bool) {
+func (matcher fromMatcher) matches(file scanner.File, facts fileFacts) ([]string, bool) {
 	var captures []string
 	if len(matcher.path) > 0 {
 		for _, pattern := range matcher.path {
@@ -169,7 +174,7 @@ func (matcher fromMatcher) matches(file scanner.File, orphan bool) ([]string, bo
 	if matchesAny(matcher.pathNot, file.Path) {
 		return nil, false
 	}
-	if matcher.orphan != nil && *matcher.orphan != orphan {
+	if matcher.orphan != nil && *matcher.orphan != facts.orphan {
 		return nil, false
 	}
 	if len(matcher.packageName) > 0 && !matchesAny(matcher.packageName, file.Package) {

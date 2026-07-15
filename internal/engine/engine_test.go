@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/butaosuinu/godep-cruiser/config"
+	"github.com/butaosuinu/godep-cruiser/internal/graph"
 	"github.com/butaosuinu/godep-cruiser/internal/scanner"
 )
 
@@ -417,6 +418,7 @@ func TestOrphanMatchesDisconnectedFiles(t *testing.T) {
 	files := []scanner.File{
 		{
 			Path:        "cmd/app/main.go",
+			PackagePath: "cmd/app",
 			Package:     "main",
 			PackageLine: 1,
 			Imports: []scanner.Import{{
@@ -426,11 +428,45 @@ func TestOrphanMatchesDisconnectedFiles(t *testing.T) {
 				Line:         3,
 			}},
 		},
-		{Path: "internal/connected/one.go", Package: "connected", PackageLine: 1},
-		{Path: "internal/connected/two.go", Package: "connected", PackageLine: 2},
-		{Path: "internal/lonely/lonely.go", Package: "lonely", PackageLine: 4},
+		{
+			Path:        "internal/connected/one.go",
+			PackagePath: "internal/connected",
+			Package:     "connected",
+			PackageLine: 1,
+		},
+		{
+			Path:        "internal/connected/two.go",
+			PackagePath: "internal/connected",
+			Package:     "connected",
+			PackageLine: 2,
+		},
+		{
+			Path:        "internal/self/one.go",
+			PackagePath: "internal/self",
+			Package:     "self",
+			PackageLine: 1,
+		},
+		{
+			Path:        "internal/self/one_test.go",
+			PackagePath: "internal/self",
+			Package:     "self_test",
+			PackageLine: 1,
+			Imports: []scanner.Import{{
+				Path:         "example.com/project/internal/self",
+				ResolvedPath: "internal/self",
+				Type:         scanner.DependencyTypeLocal,
+				Line:         3,
+			}},
+		},
+		{
+			Path:        "internal/lonely/lonely.go",
+			PackagePath: "internal/lonely",
+			Package:     "lonely",
+			PackageLine: 4,
+		},
 		{
 			Path:        "internal/stdlib/user.go",
+			PackagePath: "internal/stdlib",
 			Package:     "stdlib",
 			PackageLine: 1,
 			Imports: []scanner.Import{{
@@ -445,6 +481,95 @@ func TestOrphanMatchesDisconnectedFiles(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].From.Path != "internal/lonely/lonely.go" || got[0].From.Line != 4 || got[0].To != nil {
 		t.Errorf("Evaluate() violations = %#v, want lonely.go package-line source violation", got)
+	}
+}
+
+func TestCollectFileFactsUsesPackageDependents(t *testing.T) {
+	t.Parallel()
+
+	localImport := func(target string) scanner.Import {
+		return scanner.Import{
+			Path:         "example.com/project/" + target,
+			ResolvedPath: target,
+			Type:         scanner.DependencyTypeLocal,
+		}
+	}
+	files := []scanner.File{
+		{
+			Path:        "app/one.go",
+			PackagePath: "internal/app",
+			Imports:     []scanner.Import{localImport("internal/hub")},
+		},
+		{
+			Path:        "app/two.go",
+			PackagePath: "internal/app",
+			Imports:     []scanner.Import{localImport("internal/hub")},
+		},
+		{
+			Path:        "other/main.go",
+			PackagePath: "internal/other",
+			Imports:     []scanner.Import{localImport("internal/hub")},
+		},
+		{
+			Path:        "hub/hub.go",
+			PackagePath: "internal/hub",
+			Imports:     []scanner.Import{localImport("internal/leaf")},
+		},
+		{
+			Path:        "hub/hub_test.go",
+			PackagePath: "internal/hub",
+			Package:     "hub_test",
+			Imports: []scanner.Import{
+				localImport("internal/hub"),
+			},
+		},
+		{Path: "leaf/leaf.go", PackagePath: "internal/leaf"},
+		{Path: "lonely/lonely.go", PackagePath: "internal/lonely"},
+	}
+	facts := collectFileFacts(files, graph.Build(files))
+	tests := []struct {
+		name                   string
+		filePath               string
+		wantOrphan             bool
+		wantNumberOfDependents int
+	}{
+		{
+			name:                   "distinct importer packages count once",
+			filePath:               "hub/hub.go",
+			wantNumberOfDependents: 2,
+		},
+		{
+			name:                   "all files share package dependent count",
+			filePath:               "hub/hub_test.go",
+			wantNumberOfDependents: 2,
+		},
+		{
+			name:                   "imported leaf is not orphan",
+			filePath:               "leaf/leaf.go",
+			wantNumberOfDependents: 1,
+		},
+		{
+			name:       "disconnected importless file is orphan",
+			filePath:   "lonely/lonely.go",
+			wantOrphan: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := facts[test.filePath]
+			if got.orphan != test.wantOrphan {
+				t.Errorf("fileFacts.orphan = %t, want %t", got.orphan, test.wantOrphan)
+			}
+			if got.numberOfDependents != test.wantNumberOfDependents {
+				t.Errorf(
+					"fileFacts.numberOfDependents = %d, want %d",
+					got.numberOfDependents,
+					test.wantNumberOfDependents,
+				)
+			}
+		})
 	}
 }
 

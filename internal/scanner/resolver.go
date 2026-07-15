@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -11,9 +12,12 @@ import (
 // Resolver classifies imports relative to one Go module.
 type Resolver struct {
 	modulePath string
+	moduleRoot string
 }
 
-// NewResolver constructs a Resolver for modulePath.
+// NewResolver constructs a Resolver for modulePath without binding it to a
+// filesystem module root. Scan treats its explicit root as the module root when
+// populating File.PackagePath.
 func NewResolver(modulePath string) (Resolver, error) {
 	if modulePath == "" {
 		return Resolver{}, fmt.Errorf("module path is empty")
@@ -29,7 +33,8 @@ func NewResolver(modulePath string) (Resolver, error) {
 }
 
 // NewResolverFromGoMod reads the module directive in goModPath and constructs
-// a Resolver for it. go.work files and nested module discovery are not used.
+// a Resolver bound to the module file's directory. go.work files and nested
+// module discovery are not used.
 func NewResolverFromGoMod(goModPath string) (Resolver, error) {
 	file, err := os.Open(goModPath)
 	if err != nil {
@@ -49,6 +54,11 @@ func NewResolverFromGoMod(goModPath string) (Resolver, error) {
 	if err != nil {
 		return Resolver{}, fmt.Errorf("read go.mod %q: %w", goModPath, err)
 	}
+	moduleRoot, err := canonicalDirectory(filepath.Dir(goModPath))
+	if err != nil {
+		return Resolver{}, fmt.Errorf("resolve module root for go.mod %q: %w", goModPath, err)
+	}
+	resolver.moduleRoot = moduleRoot
 
 	return resolver, nil
 }
@@ -85,6 +95,19 @@ func (r Resolver) Resolve(importPath string) Resolution {
 	}
 
 	return Resolution{Path: importPath, Type: DependencyTypeModule}
+}
+
+func canonicalDirectory(directory string) (string, error) {
+	absolute, err := filepath.Abs(directory)
+	if err != nil {
+		return "", fmt.Errorf("make %q absolute: %w", directory, err)
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", directory, err)
+	}
+
+	return filepath.Clean(resolved), nil
 }
 
 func readModulePath(file *os.File) (string, error) {

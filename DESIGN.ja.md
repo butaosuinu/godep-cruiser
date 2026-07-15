@@ -186,6 +186,28 @@ resolver は go.mod の module path を読み、stdlib 判定(先頭セグメン
 go.work と入れ子 module の自動探索・切り替えは行わない。multi-module /
 go.work は v0 対象外。
 
+### package 粒度の依存グラフ
+
+`scanner.File` は、表示と graph identity を分離する**二重座標**を持つ。
+`Path` は scan root 相対の user-facing path であり、matcher、baseline、report が従来どおり利用する。
+`PackagePath` は module-relative な package directory であり、module root package を `.` とする。
+subroot scan でも `PackagePath` と local import の `ResolvedPath` は同じ module-relative 座標を使う。
+go.mod から作った resolver はその親ディレクトリを module root とし、module root 外の scan root を拒否する。
+module path だけから作った resolver は filesystem root を持たないため、明示された scan root を module root とみなす。
+
+**package 依存グラフ**は、`PackagePath` と観測した local import の `ResolvedPath` を node とし、両者の間に edge を作る。
+走査ファイルがない local target も、outgoing edge を持たない leaf node として保持する。
+同じ package 間の edge は、import 宣言数やファイル数にかかわらず 1 本に集約する。
+stdlib、third-party、unresolved は edge に含めない。
+
+同一ディレクトリの external test package から通常 package への import は self-edge になるため、依存グラフと逆インデックスから除外する。
+これにより、direct な fan-in と fan-out は異なる package 間の edge 数になり、ファイル分割の影響を受けない。
+ただし v0.1 の orphan 判定は同一ディレクトリの import も被 import として扱うため、全 local import の target を保持する imported view を依存グラフと分離する。
+
+forward と reverse の到達閉包は、既知の seed package を含む multi-source BFS として計算する。
+engine はファイルごとの orphan と package 単位の direct dependent 数を `fileFacts` に集約し、from matcher に渡す。
+この境界により、reachable と numberOfDependents は scanner の file edge を個別に再集約せず、同じ package 依存グラフを利用できる。
+
 ### 自動失効: baseline の 3 状態セマンティクス
 
 差別化の本体として、本家 baseline にはない stale 検出を加える。
