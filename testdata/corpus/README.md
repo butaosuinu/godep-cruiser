@@ -22,9 +22,9 @@ Each expected violation contains:
 - `from.path`, relative to the fixture module with `/` separators
 - `from.line`, the import line for edge violations or package line for
   source-only violations
-- optional `to.path` and `to.dependencyType`; `package-main-placement` and
-  `no-orphans` are source-only rules and must omit `to`, while every other
-  corpus rule is edge-only and must include it
+- optional `to.path` and `to.dependencyType`; `package-main-placement`,
+  `no-orphans`, and `handler-requires-logging` violations are source-only and
+  must omit `to`, while every other corpus violation must include it
 
 Dependency classification is delegated to `internal/scanner`. `to.path` uses
 the resolver's normalized path when it is non-empty and otherwise retains the
@@ -75,10 +75,12 @@ and compare them with the golden list.
 | `forbidden-import-target` | Product code rejects imports of a designated entrypoint tree. |
 | `orphan-file` | A disconnected file is reported while connected files are not. |
 | `package-main-placement` | `package main` is rejected outside approved command and tool roots. |
+| `required-dependency` | Each matching handler file must import the logging package; an importless file violates while a compliant sibling is retained as a positive control. |
 | `unclassified-dependency` | An allowed-rule set fails closed on an unclassified local dependency. |
 
 The first eight semantic cases are owned by issue #4; `baseline-expiry` is the
-ninth case and is owned by issue #6. They are inspired by
+ninth case and is owned by issue #6; `required-dependency` is the tenth and is
+owned by issue #24. They are inspired by
 fanout's architecture checks but are not a one-to-one copy of its test
 functions; filesystem tree-shape checks remain outside the import graph's
 scope.

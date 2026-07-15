@@ -189,6 +189,18 @@ func TestWriteErrSpecialCases(t *testing.T) {
 			want: "[ignore] rule \"custom-source\": custom.go:5: unknown violation kind \"custom-kind\"\n",
 		},
 		{
+			name: "required source explains the missing dependency",
+			violations: []engine.Violation{{
+				Rule:     "feature-requires-shared",
+				Comment:  "import the shared package",
+				Severity: "error",
+				Kind:     engine.ViolationKindRequired,
+				From:     engine.Source{Path: "internal/features/alpha/feature.go", Line: 1},
+			}},
+			want: "[error] rule \"feature-requires-shared\": internal/features/alpha/feature.go:1: required dependency is missing\n" +
+				"  fix: import the shared package\n",
+		},
+		{
 			name: "diagnostic values cannot add lines",
 			violations: []engine.Violation{{
 				Rule:     "escaped",

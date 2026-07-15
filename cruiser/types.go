@@ -31,6 +31,7 @@ type ViolationKind string
 const (
 	ViolationKindForbidden  ViolationKind = "forbidden"
 	ViolationKindNotAllowed ViolationKind = NotInAllowedRuleName
+	ViolationKindRequired   ViolationKind = "required"
 )
 
 // Source identifies the importing file and source position of a violation.
@@ -51,7 +52,7 @@ type Dependency struct {
 }
 
 // Violation describes one unsuppressed or baseline-known rule violation. To is
-// nil for source-only rules such as orphan and package-name checks.
+// nil for source-only rules such as orphan, package-name, and required checks.
 type Violation struct {
 	Rule     string
 	Comment  string

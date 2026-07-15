@@ -17,6 +17,8 @@ const (
 	ViolationKindForbidden ViolationKind = "forbidden"
 	// ViolationKindNotAllowed identifies a dependency outside the allowed set.
 	ViolationKindNotAllowed ViolationKind = NotInAllowedRuleName
+	// ViolationKindRequired identifies a source missing a required dependency.
+	ViolationKindRequired ViolationKind = "required"
 )
 
 // Source identifies the importing file and source position of a violation.

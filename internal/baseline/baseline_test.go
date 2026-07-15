@@ -63,6 +63,64 @@ func TestApplyThreeStates(t *testing.T) {
 	}
 }
 
+func TestApplyRequiredViolationThreeStates(t *testing.T) {
+	t.Parallel()
+
+	current := sourceViolation("feature-requires-shared", "internal/features/alpha/feature.go")
+	current.Kind = engine.ViolationKindRequired
+	entry := baseline.Entry{
+		Rule: current.Rule,
+		From: current.From.Path,
+	}
+	if got := baseline.Generate([]engine.Violation{current}); !reflect.DeepEqual(
+		got,
+		baseline.Baseline{Entries: []baseline.Entry{entry}},
+	) {
+		t.Fatalf("Generate(required) = %#v, want source-only entry %#v", got, entry)
+	}
+
+	tests := []struct {
+		name     string
+		baseline baseline.Baseline
+		current  []engine.Violation
+		want     baseline.Result
+	}{
+		{
+			name:    "unmatched required violation is reported",
+			current: []engine.Violation{current},
+			want: baseline.Result{
+				Violations: []engine.Violation{current},
+			},
+		},
+		{
+			name:     "matching source-only entry suppresses required violation",
+			baseline: baseline.Baseline{Entries: []baseline.Entry{entry}},
+			current:  []engine.Violation{current},
+			want: baseline.Result{
+				Known: []engine.Violation{current},
+			},
+		},
+		{
+			name:     "resolved requirement makes source-only entry stale",
+			baseline: baseline.Baseline{Entries: []baseline.Entry{entry}},
+			want: baseline.Result{
+				Stale: []baseline.StaleError{{Entry: entry}},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := baseline.Apply(test.baseline, test.current)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("Apply() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestApplyUsesOnlyExactIdentityKeys(t *testing.T) {
 	t.Parallel()
 

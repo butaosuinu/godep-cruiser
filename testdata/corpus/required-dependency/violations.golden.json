@@ -1,0 +1,26 @@
+{
+  "name": "required dependency: report a source without the required import",
+  "positiveControls": [
+    {
+      "rule": "handler-requires-logging",
+      "from": {
+        "path": "internal/handler/compliant.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/logging",
+        "dependencyType": "local"
+      }
+    }
+  ],
+  "violations": [
+    {
+      "rule": "handler-requires-logging",
+      "severity": "error",
+      "from": {
+        "path": "internal/handler/missing.go",
+        "line": 1
+      }
+    }
+  ]
+}

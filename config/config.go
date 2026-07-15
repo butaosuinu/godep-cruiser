@@ -31,6 +31,7 @@ const (
 // Allowed slice enables fail-closed checking without allowing any dependency.
 type Config struct {
 	Forbidden       []ForbiddenRule `json:"forbidden,omitempty"`
+	Required        []RequiredRule  `json:"required,omitempty"`
 	Allowed         []AllowedRule   `json:"allowed,omitempty"`
 	AllowedSeverity Severity        `json:"allowedSeverity,omitempty"`
 }
@@ -40,6 +41,7 @@ type Config struct {
 func (config Config) MarshalJSON() ([]byte, error) {
 	type wireConfig struct {
 		Forbidden       []ForbiddenRule `json:"forbidden,omitempty"`
+		Required        []RequiredRule  `json:"required,omitempty"`
 		Allowed         *[]AllowedRule  `json:"allowed,omitempty"`
 		AllowedSeverity Severity        `json:"allowedSeverity,omitempty"`
 	}
@@ -51,6 +53,7 @@ func (config Config) MarshalJSON() ([]byte, error) {
 
 	return json.Marshal(wireConfig{
 		Forbidden:       config.Forbidden,
+		Required:        config.Required,
 		Allowed:         allowed,
 		AllowedSeverity: config.AllowedSeverity,
 	})
@@ -58,6 +61,15 @@ func (config Config) MarshalJSON() ([]byte, error) {
 
 // ForbiddenRule describes dependencies or files that must be reported.
 type ForbiddenRule struct {
+	Name     string   `json:"name"`
+	Comment  string   `json:"comment,omitempty"`
+	Severity Severity `json:"severity,omitempty"`
+	From     From     `json:"from"`
+	To       To       `json:"to"`
+}
+
+// RequiredRule describes an import that every matching source file must have.
+type RequiredRule struct {
 	Name     string   `json:"name"`
 	Comment  string   `json:"comment,omitempty"`
 	Severity Severity `json:"severity,omitempty"`

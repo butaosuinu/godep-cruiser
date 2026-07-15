@@ -1,16 +1,23 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/butaosuinu/godep-cruiser/main/schema/godep-cruiser.schema.json",
-  "title": "godep-cruiser v0.1 configuration",
+  "title": "godep-cruiser v0.2 configuration",
   "description": "Dependency rules for Go source trees. Regular expressions use Go regexp syntax.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
     "forbidden": {
       "type": "array",
-      "description": "Rules whose matches produce violations. Rule names must be unique within this array.",
+      "description": "Rules whose matches produce violations. Rule names must be unique across forbidden and required.",
       "items": {
         "$ref": "#/$defs/forbiddenRule"
+      }
+    },
+    "required": {
+      "type": "array",
+      "description": "Rules requiring every matching source file to import at least one matching dependency. Rule names must be unique across forbidden and required.",
+      "items": {
+        "$ref": "#/$defs/requiredRule"
       }
     },
     "allowed": {
@@ -75,6 +82,24 @@
         "orphan": {
           "type": "boolean",
           "description": "Matches files by whether they have no incoming or outgoing dependency."
+        },
+        "packageName": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular expressions matched against the Go package clause name."
+        }
+      }
+    },
+    "requiredFrom": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular expressions matched against the importing file path. Captures supply $1, $2, and later references in to.path and to.pathNot."
+        },
+        "pathNot": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular expressions that exclude importing file paths."
         },
         "packageName": {
           "$ref": "#/$defs/regexArray",
@@ -157,6 +182,34 @@
         },
         "to": {
           "$ref": "#/$defs/to"
+        }
+      }
+    },
+    "requiredRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/ruleName"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "severity": {
+          "$ref": "#/$defs/severity",
+          "default": "warn"
+        },
+        "from": {
+          "$ref": "#/$defs/requiredFrom"
+        },
+        "to": {
+          "$ref": "#/$defs/to",
+          "minProperties": 1
         }
       }
     }

@@ -4,7 +4,7 @@ Validate dependency rules for Go source trees.
 
 godep-cruiser is a clean-room Go reimplementation of the concepts in
 [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) by
-Sander Verweij — forbidden/allowed rules with regex `path` / `pathNot`
+Sander Verweij — forbidden/allowed/required rules with regex `path` / `pathNot`
 matching at file granularity, dependency-type classification
 (stdlib / in-module / third-party / unresolved), and a violation baseline.
 It adds one thing the original does not have: stale baseline entries fail
@@ -65,7 +65,7 @@ gap with a rules model proven by dependency-cruiser.
 
 ## Configuration
 
-v0.1 configuration is JSON-only so the runtime remains standard-library-only.
+v0.2 configuration is JSON-only so the runtime remains standard-library-only.
 The published [JSON Schema](schema/godep-cruiser.schema.json) describes every
 accepted field; the loader also validates Go regular expressions, numeric
 capture references, unknown fields, and source positions.
@@ -82,6 +82,19 @@ capture references, unknown fields, and source positions.
       "to": {
         "path": ["^internal/features/"],
         "pathNot": ["^internal/features/$1/"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ],
+  "required": [
+    {
+      "name": "services-require-logging",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/services/"]
+      },
+      "to": {
+        "path": ["^internal/logging$"],
         "dependencyTypes": ["local"]
       }
     }
@@ -103,6 +116,11 @@ capture references, unknown fields, and source positions.
 references in `to.path` and `to.pathNot`. See
 [DESIGN.ja.md](DESIGN.ja.md#設定形式と-loader) for the matching and validation
 semantics.
+
+Each `required` rule checks every file matching `from` and reports one
+source-only violation when none of that file's imports matches `to`. An
+importless matching file therefore violates the rule. `from: {}` is a
+catch-all; `to: {}` and `from.orphan` are invalid for required rules.
 
 ## Library API
 
@@ -154,8 +172,8 @@ A baseline is a strict JSON document containing exact violation keys:
 
 For an import edge, the key is `rule` + `from` + `to`, where `to` is the raw
 import path written in the Go source rather than a resolved path. Source-only
-violations such as orphan and package-name rules omit `to` and match on the
-pair `rule` and `from`.
+violations such as orphan, package-name, and required rules omit `to` and match
+on the pair `rule` and `from`.
 
 The baseline has three outcomes:
 

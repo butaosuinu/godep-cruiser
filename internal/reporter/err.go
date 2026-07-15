@@ -70,6 +70,9 @@ func sourceReason(kind engine.ViolationKind) string {
 	if kind == engine.ViolationKindForbidden {
 		return "forbidden source"
 	}
+	if kind == engine.ViolationKindRequired {
+		return "required dependency is missing"
+	}
 
 	return fmt.Sprintf("unknown violation kind %q", kind)
 }
