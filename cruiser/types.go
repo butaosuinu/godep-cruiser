@@ -17,7 +17,8 @@ type Options struct {
 	ScanRoot string
 	// GoModPath names the single go.mod used to classify imports. An empty
 	// value means "go.mod" below ScanRoot. go.work and nested-module discovery
-	// are intentionally not performed.
+	// are intentionally not performed. ScanRoot must be within the module
+	// directory containing GoModPath.
 	GoModPath string
 	// Baseline suppresses exact matching current violations and makes unmatched
 	// entries stale errors. A nil value disables baseline filtering.

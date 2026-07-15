@@ -40,8 +40,12 @@ type Import struct {
 // File records the dependency information parsed from one Go source file.
 type File struct {
 	// Path is slash-separated and relative to the explicit scan root.
-	Path    string
-	Package string
+	Path string
+	// PackagePath is the slash-separated, module-relative directory that
+	// identifies the file's package in package-level dependency graphs. The
+	// module root package is ".".
+	PackagePath string
+	Package     string
 	// PackageLine is the one-based line containing the package clause.
 	PackageLine int
 	Imports     []Import

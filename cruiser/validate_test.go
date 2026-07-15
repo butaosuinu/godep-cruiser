@@ -123,6 +123,45 @@ func TestValidateReportsRequiredDependencyThroughPublicTypes(t *testing.T) {
 	}
 }
 
+func TestValidateSubrootPreservesUserFacingPaths(t *testing.T) {
+	t.Parallel()
+
+	moduleRoot := t.TempDir()
+	writeTestFile(t, filepath.Join(moduleRoot, "go.mod"), "module example.com/project\n\ngo 1.25.0\n")
+	scanRoot := filepath.Join(moduleRoot, "internal")
+	if err := os.MkdirAll(filepath.Join(scanRoot, "app"), 0o750); err != nil {
+		t.Fatalf("os.MkdirAll() error = %v", err)
+	}
+	writeTestFile(t, filepath.Join(scanRoot, "app", "app.go"), "package app\n\nimport _ \"os\"\n")
+	to := "os"
+	configuration := &config.Config{Forbidden: []config.ForbiddenRule{{
+		Name:     "no-os",
+		Severity: config.SeverityError,
+		From:     config.From{Path: []string{`^app/app\.go$`}},
+		To:       config.To{Path: []string{`^os$`}},
+	}}}
+	baseline := &cruiser.Baseline{Entries: []cruiser.BaselineEntry{{
+		Rule: "no-os",
+		From: "app/app.go",
+		To:   &to,
+	}}}
+
+	result, err := cruiser.Validate(configuration, cruiser.Options{
+		ScanRoot:  scanRoot,
+		GoModPath: filepath.Join(moduleRoot, "go.mod"),
+		Baseline:  baseline,
+	})
+	if err != nil {
+		t.Fatalf("cruiser.Validate() error = %v", err)
+	}
+	if len(result.Violations) != 0 || len(result.Known) != 1 || len(result.Stale) != 0 {
+		t.Fatalf("result = %+v, want one baseline-known violation", result)
+	}
+	if result.Known[0].From.Path != "app/app.go" {
+		t.Errorf("known violation from path = %q, want scan-root-relative app/app.go", result.Known[0].From.Path)
+	}
+}
+
 func TestValidateRejectsInvalidProgrammaticConfiguration(t *testing.T) {
 	t.Parallel()
 
