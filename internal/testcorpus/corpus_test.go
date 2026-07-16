@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/butaosuinu/godep-cruiser/internal/graph"
 	"github.com/butaosuinu/godep-cruiser/internal/scanner"
 )
 
@@ -33,11 +34,13 @@ func TestViolationCorpus(t *testing.T) {
 		"number-of-dependents",
 		"orphan-file",
 		"package-main-placement",
+		"reachable-test-helper",
 		"required-dependency",
 		"stdlib-denylist-exception",
 		"stdlib-only-tree",
 		"third-party-in-core",
 		"unclassified-dependency",
+		"unreachable-dead-code",
 	}
 	gotIDs := make([]string, 0, len(cases))
 	for _, fixture := range cases {
@@ -181,6 +184,9 @@ func validateGoldenLocation(violation ExpectedViolation, files map[string]parsed
 			found.line == violation.From.Line
 	})
 	if !found {
+		if violation.Rule == "production-no-testutil" {
+			return validateReachableGoldenLocation(violation, file, files)
+		}
 		return fmt.Errorf("golden %s target %q (%s) at line %d does not match an import in %s",
 			violation.Rule,
 			violation.To.Path,
@@ -190,6 +196,70 @@ func validateGoldenLocation(violation ExpectedViolation, files map[string]parsed
 		)
 	}
 	return nil
+}
+
+func validateReachableGoldenLocation(
+	violation ExpectedViolation,
+	file parsedFile,
+	files map[string]parsedFile,
+) error {
+	if violation.To.DependencyType != string(scanner.DependencyTypeLocal) {
+		return fmt.Errorf(
+			"reachable golden %s target %q has dependency type %q, want local",
+			violation.Rule,
+			violation.To.Path,
+			violation.To.DependencyType,
+		)
+	}
+
+	seeds := make([]string, 0)
+	for _, dependency := range file.imports {
+		if dependency.line == violation.From.Line &&
+			dependency.dependencyType == string(scanner.DependencyTypeLocal) {
+			seeds = append(seeds, dependency.path)
+		}
+	}
+	if len(seeds) == 0 {
+		return fmt.Errorf(
+			"reachable golden %s source %s has no local import at line %d",
+			violation.Rule,
+			violation.From.Path,
+			violation.From.Line,
+		)
+	}
+
+	closure := fixtureDependencyGraph(files).ForwardClosure(seeds...)
+	if !slices.Contains(closure, violation.To.Path) {
+		return fmt.Errorf(
+			"reachable golden %s target %q is not reachable from local imports at %s:%d",
+			violation.Rule,
+			violation.To.Path,
+			violation.From.Path,
+			violation.From.Line,
+		)
+	}
+	return nil
+}
+
+func fixtureDependencyGraph(files map[string]parsedFile) graph.Graph {
+	graphFiles := make([]scanner.File, 0, len(files))
+	for _, sourcePath := range sortedFilePaths(files) {
+		file := files[sourcePath]
+		graphFile := scanner.File{
+			Path:        sourcePath,
+			PackagePath: path.Dir(sourcePath),
+			Imports:     make([]scanner.Import, 0, len(file.imports)),
+		}
+		for _, dependency := range file.imports {
+			graphFile.Imports = append(graphFile.Imports, scanner.Import{
+				ResolvedPath: dependency.path,
+				Type:         scanner.DependencyType(dependency.dependencyType),
+			})
+		}
+		graphFiles = append(graphFiles, graphFile)
+	}
+
+	return graph.Build(graphFiles)
 }
 
 func validateOrphanLocation(sourcePath string, file parsedFile, files map[string]parsedFile) error {
@@ -427,6 +497,36 @@ func TestValidateGoldenLocation(t *testing.T) {
 		Severity: "error",
 		From:     Location{Path: "internal/lonely/lonely.go", Line: 1},
 	}
+	reachable := ExpectedViolation{
+		Rule:     "production-no-testutil",
+		Severity: "error",
+		From:     Location{Path: "internal/app/unsafe.go", Line: 3},
+		To: &Dependency{
+			Path:           "internal/testutil",
+			DependencyType: string(scanner.DependencyTypeLocal),
+		},
+	}
+	reachableFiles := map[string]parsedFile{
+		"internal/app/unsafe.go": {
+			packageName: "app",
+			packageLine: 1,
+			imports: []parsedImport{{
+				path:           "internal/service",
+				dependencyType: string(scanner.DependencyTypeLocal),
+				line:           3,
+			}},
+		},
+		"internal/service/service.go": {
+			packageName: "service",
+			packageLine: 1,
+			imports: []parsedImport{{
+				path:           "internal/testutil",
+				dependencyType: string(scanner.DependencyTypeLocal),
+				line:           3,
+			}},
+		},
+		"internal/testutil/testutil.go": {packageName: "testutil", packageLine: 1},
+	}
 	tests := []struct {
 		name      string
 		violation ExpectedViolation
@@ -483,6 +583,47 @@ func TestValidateGoldenLocation(t *testing.T) {
 				"internal/lonely/lonely.go": {packageName: "lonely", packageLine: 1},
 			},
 			wantError: "incoming import",
+		},
+		{
+			name:      "reachable edge accepts a transitive local target",
+			violation: reachable,
+			files:     reachableFiles,
+		},
+		{
+			name: "reachable edge rejects a line without a local seed import",
+			violation: ExpectedViolation{
+				Rule:     reachable.Rule,
+				Severity: reachable.Severity,
+				From:     Location{Path: reachable.From.Path, Line: 4},
+				To:       reachable.To,
+			},
+			files:     reachableFiles,
+			wantError: "has no local import at line 4",
+		},
+		{
+			name: "reachable edge rejects a target outside the seed closure",
+			violation: ExpectedViolation{
+				Rule:     reachable.Rule,
+				Severity: reachable.Severity,
+				From:     reachable.From,
+				To: &Dependency{
+					Path:           "internal/other",
+					DependencyType: string(scanner.DependencyTypeLocal),
+				},
+			},
+			files:     reachableFiles,
+			wantError: "is not reachable",
+		},
+		{
+			name: "ordinary edge still rejects a transitive-only target",
+			violation: ExpectedViolation{
+				Rule:     "ordinary-edge",
+				Severity: reachable.Severity,
+				From:     reachable.From,
+				To:       reachable.To,
+			},
+			files:     reachableFiles,
+			wantError: "does not match an import",
 		},
 	}
 
@@ -751,6 +892,15 @@ func TestValidateViolationRuleShape(t *testing.T) {
 			name:      "required rule rejects import target",
 			violation: ExpectedViolation{Rule: "handler-requires-logging", Severity: "error", From: location, To: edge},
 			wantError: `source-only rule "handler-requires-logging" must not set to`,
+		},
+		{
+			name:      "unreachable rule stays source-only",
+			violation: ExpectedViolation{Rule: "entrypoint-reaches-production", Severity: "error", From: location},
+		},
+		{
+			name:      "unreachable rule rejects import target",
+			violation: ExpectedViolation{Rule: "entrypoint-reaches-production", Severity: "error", From: location, To: edge},
+			wantError: `source-only rule "entrypoint-reaches-production" must not set to`,
 		},
 	}
 

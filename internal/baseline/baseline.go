@@ -14,8 +14,9 @@ type Baseline struct {
 }
 
 // Entry identifies one known violation. To is nil for source-only violations.
-// Line, severity, dependency type, resolved path, kind, and comment are not
-// part of the identity.
+// Edge entries normally use the raw import path; reachable entries use the
+// synthesized package path because no raw import exists. Line, severity,
+// dependency type, kind, and comment are not part of the identity.
 type Entry struct {
 	Rule string  `json:"rule"`
 	From string  `json:"from"`
@@ -122,6 +123,9 @@ func entryFromViolation(violation engine.Violation) Entry {
 	}
 	if violation.To != nil {
 		to := violation.To.ImportPath
+		if violation.Kind == engine.ViolationKindReachable {
+			to = violation.To.Path
+		}
 		entry.To = &to
 	}
 

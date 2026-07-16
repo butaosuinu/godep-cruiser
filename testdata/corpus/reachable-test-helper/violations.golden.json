@@ -1,0 +1,30 @@
+{
+  "name": "reachable: reject only the source whose local import reaches test helpers",
+  "positiveControls": [
+    {
+      "rule": "production-no-testutil",
+      "from": {
+        "path": "internal/app/safe.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/safe",
+        "dependencyType": "local"
+      }
+    }
+  ],
+  "violations": [
+    {
+      "rule": "production-no-testutil",
+      "severity": "error",
+      "from": {
+        "path": "internal/app/unsafe.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/testutil",
+        "dependencyType": "local"
+      }
+    }
+  ]
+}

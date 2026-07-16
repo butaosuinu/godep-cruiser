@@ -99,12 +99,15 @@ type From struct {
 	NumberOfDependentsMoreThan *int     `json:"numberOfDependentsMoreThan,omitempty"`
 }
 
-// To contains conditions matched against an imported dependency.
-// Pattern and dependency-type slices use OR semantics within a field and AND
-// semantics across fields.
+// To contains conditions matched against an imported dependency or, for a
+// reachable forbidden rule, a package in the local dependency graph. Pattern
+// and dependency-type slices use OR semantics within a field and AND semantics
+// across fields. Reachable is a pointer so an omitted condition differs from
+// false.
 type To struct {
 	Path               []string         `json:"path,omitempty"`
 	PathNot            []string         `json:"pathNot,omitempty"`
+	Reachable          *bool            `json:"reachable,omitempty"`
 	DependencyTypes    []DependencyType `json:"dependencyTypes,omitempty"`
 	DependencyTypesNot []DependencyType `json:"dependencyTypesNot,omitempty"`
 }

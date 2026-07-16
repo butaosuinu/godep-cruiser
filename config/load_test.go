@@ -152,6 +152,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 				if got.Forbidden[0].Severity != SeverityWarn {
 					t.Errorf("default Severity = %q, want %q", got.Forbidden[0].Severity, SeverityWarn)
 				}
+				if got.Forbidden[0].To.Reachable != nil {
+					t.Errorf("default Reachable = %v, want nil", got.Forbidden[0].To.Reachable)
+				}
 				if got.AllowedSeverity != SeverityWarn {
 					t.Errorf("default AllowedSeverity = %q, want %q", got.AllowedSeverity, SeverityWarn)
 				}
@@ -195,6 +198,54 @@ func TestLoadValidConfiguration(t *testing.T) {
 			input: captureRule(`"^(.*)$"`, `"[^^]$1"`),
 			check: func(t *testing.T, _ *Config) {
 				t.Helper()
+			},
+		},
+		{
+			name: "reachable true allows captures and pathNot",
+			input: `{
+  "forbidden": [{
+    "name": "reachable-capture",
+    "from": {"path": ["^cmd/([^/]+)/"]},
+    "to": {
+      "path": ["^internal/$1/"],
+      "pathNot": ["^internal/$1/allowed$"],
+      "reachable": true
+    }
+  }]
+}`,
+			check: func(t *testing.T, got *Config) {
+				t.Helper()
+				reachable := got.Forbidden[0].To.Reachable
+				if reachable == nil || !*reachable {
+					t.Errorf("Reachable = %v, want pointer to true", reachable)
+				}
+				if len(got.Forbidden[0].To.PathNot) != 1 {
+					t.Errorf("PathNot = %#v, want one exclusion", got.Forbidden[0].To.PathNot)
+				}
+			},
+		},
+		{
+			name: "reachable false allows plain pathNot",
+			input: `{
+  "forbidden": [{
+    "name": "unreachable",
+    "from": {"path": ["^cmd/"]},
+    "to": {
+      "path": ["^internal/"],
+      "pathNot": ["/generated$"],
+      "reachable": false
+    }
+  }]
+}`,
+			check: func(t *testing.T, got *Config) {
+				t.Helper()
+				reachable := got.Forbidden[0].To.Reachable
+				if reachable == nil || *reachable {
+					t.Errorf("Reachable = %v, want pointer to false", reachable)
+				}
+				if len(got.Forbidden[0].To.PathNot) != 1 {
+					t.Errorf("PathNot = %#v, want one exclusion", got.Forbidden[0].To.PathNot)
+				}
 			},
 		},
 	}
@@ -246,6 +297,14 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "required from dependent count is unsupported", input: `{"required":[{"name":"x","from":{"numberOfDependentsMoreThan":0},"to":{"path":["a"]}}]}`, wantPath: "$.required[0].from.numberOfDependentsMoreThan", wantText: `unknown field "numberOfDependentsMoreThan"`},
 		{name: "unknown from field", input: validRule(`"from":{"reachable":true}`), wantPath: "$.forbidden[0].from.reachable", wantText: `unknown field "reachable"`},
 		{name: "unknown to field", input: validRule(`"to":{"couldNotResolve":true}`), wantPath: "$.forbidden[0].to.couldNotResolve", wantText: `unknown field "couldNotResolve"`},
+		{name: "allowed reachable is unsupported", input: `{"allowed":[{"name":"x","from":{},"to":{"path":["a"],"reachable":true}}]}`, wantPath: "$.allowed[0].to.reachable", wantText: `unknown field "reachable"`},
+		{name: "required reachable is unsupported", input: `{"required":[{"name":"x","from":{},"to":{"path":["a"],"reachable":true}}]}`, wantPath: "$.required[0].to.reachable", wantText: `unknown field "reachable"`},
+		{name: "reachable must be boolean", input: validRule(`"to":{"path":["a"],"reachable":null}`), wantPath: "$.forbidden[0].to.reachable", wantText: "must be a boolean"},
+		{name: "reachable false requires path", input: validRule(`"to":{"pathNot":["a"],"reachable":false}`), wantPath: "$.forbidden[0].to", wantText: `field "reachable" requires field "path"`},
+		{name: "reachable rejects dependency types", input: validRule(`"to":{"path":["a"],"reachable":true,"dependencyTypes":["local"]}`), wantPath: "$.forbidden[0].to.dependencyTypes", wantText: `cannot be combined with "reachable"`},
+		{name: "reachable false rejects excluded dependency types", input: validRule(`"to":{"path":["a"],"reachable":false,"dependencyTypesNot":["unresolved"]}`), wantPath: "$.forbidden[0].to.dependencyTypesNot", wantText: `cannot be combined with "reachable"`},
+		{name: "reachable false rejects path capture", input: `{"forbidden":[{"name":"x","from":{"path":["^cmd/([^/]+)/"]},"to":{"path":["^internal/$1/"],"reachable":false}}]}`, wantPath: "$.forbidden[0].to.path[0]", wantText: "capture references are not allowed with reachable: false"},
+		{name: "reachable false rejects pathNot capture", input: `{"forbidden":[{"name":"x","from":{"path":["^cmd/([^/]+)/"]},"to":{"path":["^internal/"],"pathNot":["^internal/$1/"],"reachable":false}}]}`, wantPath: "$.forbidden[0].to.pathNot[0]", wantText: "capture references are not allowed with reachable: false"},
 		{name: "path must be array", input: validRule(`"from":{"path":"^cmd/"}`), wantPath: "$.forbidden[0].from.path", wantText: "must be an array"},
 		{name: "path cannot be empty array", input: validRule(`"from":{"path":[]}`), wantPath: "$.forbidden[0].from.path", wantText: "at least one item"},
 		{name: "path items must be strings", input: validRule(`"from":{"path":[null]}`), wantPath: "$.forbidden[0].from.path[0]", wantText: "must be a string"},
@@ -550,11 +609,12 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		Dialect     string                     `json:"$schema"`
 		Properties  map[string]json.RawMessage `json:"properties"`
 		Definitions map[string]struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-			Enum       []string                   `json:"enum"`
-			Type       string                     `json:"type"`
-			MinLength  int                        `json:"minLength"`
-			Not        struct {
+			Properties       map[string]json.RawMessage `json:"properties"`
+			DependentSchemas map[string]json.RawMessage `json:"dependentSchemas"`
+			Enum             []string                   `json:"enum"`
+			Type             string                     `json:"type"`
+			MinLength        int                        `json:"minLength"`
+			Not              struct {
 				Const string `json:"const"`
 			} `json:"not"`
 		} `json:"$defs"`
@@ -575,6 +635,7 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		{name: "from", properties: schema.Definitions["from"].Properties, want: []string{"path", "pathNot", "orphan", "packageName", "numberOfDependentsLessThan", "numberOfDependentsMoreThan"}},
 		{name: "required from", properties: schema.Definitions["requiredFrom"].Properties, want: []string{"path", "pathNot", "packageName"}},
 		{name: "to", properties: schema.Definitions["to"].Properties, want: []string{"path", "pathNot", "dependencyTypes", "dependencyTypesNot"}},
+		{name: "forbidden to", properties: schema.Definitions["forbiddenTo"].Properties, want: []string{"path", "pathNot", "reachable", "dependencyTypes", "dependencyTypesNot"}},
 		{name: "forbidden rule", properties: schema.Definitions["forbiddenRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
 		{name: "required rule", properties: schema.Definitions["requiredRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
 		{name: "allowed rule", properties: schema.Definitions["allowedRule"].Properties, want: []string{"name", "comment", "from", "to"}},
@@ -655,6 +716,65 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 				t.Errorf("from.%s schema = %#v, want integer minimum %d", test.name, property, test.minimum)
 			}
 		})
+	}
+
+	var reachableProperty struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(schema.Definitions["forbiddenTo"].Properties["reachable"], &reachableProperty); err != nil {
+		t.Fatalf("decode forbiddenTo reachable property: %v", err)
+	}
+	if reachableProperty.Type != "boolean" {
+		t.Errorf("forbiddenTo reachable type = %q, want boolean", reachableProperty.Type)
+	}
+
+	ruleToTests := []struct {
+		definition string
+		want       string
+	}{
+		{definition: "forbiddenRule", want: "#/$defs/forbiddenTo"},
+		{definition: "allowedRule", want: "#/$defs/to"},
+	}
+	for _, test := range ruleToTests {
+		var property struct {
+			Reference string `json:"$ref"`
+		}
+		if err := json.Unmarshal(schema.Definitions[test.definition].Properties["to"], &property); err != nil {
+			t.Fatalf("decode %s to property: %v", test.definition, err)
+		}
+		if property.Reference != test.want {
+			t.Errorf("%s to reference = %q, want %q", test.definition, property.Reference, test.want)
+		}
+	}
+
+	var reachableDependencies struct {
+		Required []string `json:"required"`
+		Not      struct {
+			AnyOf []struct {
+				Required []string `json:"required"`
+			} `json:"anyOf"`
+		} `json:"not"`
+	}
+	if err := json.Unmarshal(
+		schema.Definitions["forbiddenTo"].DependentSchemas["reachable"],
+		&reachableDependencies,
+	); err != nil {
+		t.Fatalf("decode forbiddenTo reachable dependencies: %v", err)
+	}
+	if strings.Join(reachableDependencies.Required, ",") != "path" {
+		t.Errorf("reachable required fields = %q, want path", reachableDependencies.Required)
+	}
+	conflicts := make(map[string]bool)
+	for _, condition := range reachableDependencies.Not.AnyOf {
+		if len(condition.Required) == 1 {
+			conflicts[condition.Required[0]] = true
+		}
+	}
+	if len(conflicts) != 2 || !conflicts["dependencyTypes"] || !conflicts["dependencyTypesNot"] {
+		t.Errorf(
+			"reachable conflicting fields = %v, want dependencyTypes and dependencyTypesNot",
+			conflicts,
+		)
 	}
 
 	var requiredTo struct {

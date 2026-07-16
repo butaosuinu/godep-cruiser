@@ -42,6 +42,30 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 	factsByPath := collectFileFacts(files, packageGraph)
 	violations := make([]Violation, 0)
 	for _, rule := range forbiddenRules {
+		if rule.to.reachable != nil {
+			var matchErr error
+			if *rule.to.reachable {
+				violations, matchErr = appendReachableViolations(
+					violations,
+					rule,
+					files,
+					factsByPath,
+					packageGraph,
+				)
+			} else {
+				violations, matchErr = appendUnreachableViolations(
+					violations,
+					rule,
+					files,
+					factsByPath,
+					packageGraph,
+				)
+			}
+			if matchErr != nil {
+				return nil, fmt.Errorf("forbidden rule %q to: %w", rule.name, matchErr)
+			}
+			continue
+		}
 		if rule.sourceOnly {
 			violations = appendSourceViolations(violations, rule, files, factsByPath)
 			continue
@@ -121,6 +145,95 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 	}
 
 	sortViolations(violations)
+
+	return violations, nil
+}
+
+func appendReachableViolations(
+	violations []Violation,
+	rule compiledForbiddenRule,
+	files []scanner.File,
+	factsByPath map[string]fileFacts,
+	packageGraph graph.Graph,
+) ([]Violation, error) {
+	for _, file := range files {
+		captures, matched := rule.from.matches(file, factsByPath[file.Path])
+		if !matched {
+			continue
+		}
+
+		lowestLineByTarget := make(map[string]int)
+		for _, dependency := range file.Imports {
+			if dependency.Type != scanner.DependencyTypeLocal || dependency.ResolvedPath == "" {
+				continue
+			}
+			for _, targetPackage := range packageGraph.ForwardClosure(dependency.ResolvedPath) {
+				matched, err := rule.to.matchesPackagePath(targetPackage, captures)
+				if err != nil {
+					return nil, err
+				}
+				if !matched {
+					continue
+				}
+				line, exists := lowestLineByTarget[targetPackage]
+				if !exists || dependency.Line < line {
+					lowestLineByTarget[targetPackage] = dependency.Line
+				}
+			}
+		}
+
+		for targetPackage, line := range lowestLineByTarget {
+			violations = append(violations, reachableViolation(
+				rule.name,
+				rule.comment,
+				rule.severity,
+				file,
+				targetPackage,
+				line,
+			))
+		}
+	}
+
+	return violations, nil
+}
+
+func appendUnreachableViolations(
+	violations []Violation,
+	rule compiledForbiddenRule,
+	files []scanner.File,
+	factsByPath map[string]fileFacts,
+	packageGraph graph.Graph,
+) ([]Violation, error) {
+	seedPackages := make([]string, 0)
+	for _, file := range files {
+		if _, matched := rule.from.matches(file, factsByPath[file.Path]); matched {
+			seedPackages = append(seedPackages, file.PackagePath)
+		}
+	}
+
+	reachablePackages := make(map[string]struct{})
+	for _, packagePath := range packageGraph.ForwardClosure(seedPackages...) {
+		reachablePackages[packagePath] = struct{}{}
+	}
+	for _, file := range files {
+		matched, err := rule.to.matchesPackagePath(file.PackagePath, nil)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			continue
+		}
+		if _, reachable := reachablePackages[file.PackagePath]; reachable {
+			continue
+		}
+		violations = append(violations, sourceViolation(
+			rule.name,
+			rule.comment,
+			rule.severity,
+			ViolationKindUnreachable,
+			file,
+		))
+	}
 
 	return violations, nil
 }
@@ -210,6 +323,30 @@ func edgeViolation(
 			Path:       effectiveDependencyPath(dependency),
 			ImportPath: dependency.Path,
 			Type:       dependency.Type,
+		},
+	}
+}
+
+func reachableViolation(
+	rule, comment string,
+	severity config.Severity,
+	file scanner.File,
+	targetPackage string,
+	line int,
+) Violation {
+	return Violation{
+		Rule:     rule,
+		Comment:  comment,
+		Severity: severity,
+		Kind:     ViolationKindReachable,
+		From: Source{
+			Path:        file.Path,
+			Line:        line,
+			PackageName: file.Package,
+		},
+		To: &Dependency{
+			Path: targetPackage,
+			Type: scanner.DependencyTypeLocal,
 		},
 	}
 }

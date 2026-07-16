@@ -203,6 +203,199 @@ func TestCaptureExpansion(t *testing.T) {
 	}
 }
 
+func TestReachableForbiddenRule(t *testing.T) {
+	t.Parallel()
+
+	reachable := true
+	localImport := func(target string, line int) scanner.Import {
+		return scanner.Import{
+			Path:         "example.com/project/" + target,
+			ResolvedPath: target,
+			Type:         scanner.DependencyTypeLocal,
+			Line:         line,
+		}
+	}
+	files := []scanner.File{
+		{
+			Path:        "cmd/app/main.go",
+			PackagePath: "cmd/app",
+			Package:     "main",
+			PackageLine: 1,
+			Imports: []scanner.Import{
+				localImport("internal/app/service-a", 9),
+				{Path: "fmt", ResolvedPath: "fmt", Type: scanner.DependencyTypeStdlib, Line: 3},
+				localImport("internal/app/service-b", 4),
+				localImport("internal/app/missing", 6),
+			},
+		},
+		{
+			Path:        "cmd/app/helper.go",
+			PackagePath: "cmd/app",
+			Package:     "main",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/app/helper-only", 3)},
+		},
+		{
+			Path:        "cmd/worker/main.go",
+			PackagePath: "cmd/worker",
+			Package:     "main",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/worker/service", 7)},
+		},
+		{
+			Path:        "internal/app/service-a/service.go",
+			PackagePath: "internal/app/service-a",
+			Package:     "servicea",
+			PackageLine: 1,
+			Imports: []scanner.Import{
+				localImport("internal/app/testutil", 3),
+				localImport("internal/app/allowed", 4),
+			},
+		},
+		{
+			Path:        "internal/app/service-b/service.go",
+			PackagePath: "internal/app/service-b",
+			Package:     "serviceb",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/app/bridge", 3)},
+		},
+		{
+			Path:        "internal/app/bridge/bridge.go",
+			PackagePath: "internal/app/bridge",
+			Package:     "bridge",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/app/testutil", 3)},
+		},
+		{Path: "internal/app/testutil/helper.go", PackagePath: "internal/app/testutil", Package: "testutil", PackageLine: 1},
+		{Path: "internal/app/allowed/allowed.go", PackagePath: "internal/app/allowed", Package: "allowed", PackageLine: 1},
+		{Path: "internal/app/helper-only/helper.go", PackagePath: "internal/app/helper-only", Package: "helperonly", PackageLine: 1},
+		{
+			Path:        "internal/worker/service/service.go",
+			PackagePath: "internal/worker/service",
+			Package:     "service",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/worker/testutil", 3)},
+		},
+		{Path: "internal/worker/testutil/helper.go", PackagePath: "internal/worker/testutil", Package: "testutil", PackageLine: 1},
+	}
+	configuration := config.Config{Forbidden: []config.ForbiddenRule{{
+		Name:     "production-no-testutil",
+		Comment:  "keep test helpers out of production",
+		Severity: config.SeverityError,
+		From:     config.From{Path: []string{`^cmd/([^/]+)/main\.go$`}},
+		To: config.To{
+			Path:      []string{`^internal/$1/(?:testutil|missing|allowed|helper-only)$`},
+			PathNot:   []string{`/allowed$`},
+			Reachable: &reachable,
+		},
+	}}}
+
+	got, err := Evaluate(&configuration, files)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	want := []struct {
+		from string
+		line int
+		to   string
+	}{
+		{from: "cmd/app/main.go", line: 4, to: "internal/app/testutil"},
+		{from: "cmd/app/main.go", line: 6, to: "internal/app/missing"},
+		{from: "cmd/worker/main.go", line: 7, to: "internal/worker/testutil"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Evaluate() violations = %#v, want %d reachable violations", got, len(want))
+	}
+	for index, violation := range got {
+		if violation.Rule != "production-no-testutil" ||
+			violation.Comment != "keep test helpers out of production" ||
+			violation.Severity != config.SeverityError ||
+			violation.Kind != ViolationKindReachable ||
+			violation.From.Path != want[index].from ||
+			violation.From.Line != want[index].line ||
+			violation.From.PackageName != "main" ||
+			violation.To == nil ||
+			violation.To.Path != want[index].to ||
+			violation.To.ImportPath != "" ||
+			violation.To.Type != scanner.DependencyTypeLocal {
+			t.Errorf("reachable violation[%d] = %#v, want (%s:%d -> %s)", index, violation, want[index].from, want[index].line, want[index].to)
+		}
+	}
+}
+
+func TestUnreachableForbiddenRule(t *testing.T) {
+	t.Parallel()
+
+	reachable := false
+	localImport := func(target string) scanner.Import {
+		return scanner.Import{
+			Path:         "example.com/project/" + target,
+			ResolvedPath: target,
+			Type:         scanner.DependencyTypeLocal,
+			Line:         3,
+		}
+	}
+	files := []scanner.File{
+		{
+			Path:        "cmd/app/main.go",
+			PackagePath: "cmd/app",
+			Package:     "main",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/live")},
+		},
+		{
+			Path:        "tools/generate/main.go",
+			PackagePath: "tools/generate",
+			Package:     "main",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/generated")},
+		},
+		{
+			Path:        "internal/live/live.go",
+			PackagePath: "internal/live",
+			Package:     "live",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/shared")},
+		},
+		{Path: "internal/shared/shared.go", PackagePath: "internal/shared", Package: "shared", PackageLine: 1},
+		{Path: "internal/generated/generated.go", PackagePath: "internal/generated", Package: "generated", PackageLine: 1},
+		{Path: "internal/dead/a.go", PackagePath: "internal/dead", Package: "dead", PackageLine: 2},
+		{Path: "internal/dead/b.go", PackagePath: "internal/dead", Package: "dead", PackageLine: 5},
+		{Path: "internal/dead/excluded/excluded.go", PackagePath: "internal/dead/excluded", Package: "excluded", PackageLine: 1},
+	}
+	configuration := config.Config{Forbidden: []config.ForbiddenRule{{
+		Name:     "entrypoints-reach-production",
+		Severity: config.SeverityWarn,
+		From:     config.From{Path: []string{`^(?:cmd|tools)/`}},
+		To: config.To{
+			Path:      []string{`^internal/`},
+			PathNot:   []string{`^internal/dead/excluded$`},
+			Reachable: &reachable,
+		},
+	}}}
+
+	got, err := Evaluate(&configuration, files)
+	if err != nil {
+		t.Fatalf("Evaluate() error = %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("Evaluate() violations = %#v, want two files in internal/dead", got)
+	}
+	wantPaths := []string{"internal/dead/a.go", "internal/dead/b.go"}
+	wantLines := []int{2, 5}
+	for index, violation := range got {
+		if violation.Rule != "entrypoints-reach-production" ||
+			violation.Severity != config.SeverityWarn ||
+			violation.Kind != ViolationKindUnreachable ||
+			violation.From.Path != wantPaths[index] ||
+			violation.From.Line != wantLines[index] ||
+			violation.From.PackageName != "dead" ||
+			violation.To != nil {
+			t.Errorf("unreachable violation[%d] = %#v, want source-only %s:%d", index, violation, wantPaths[index], wantLines[index])
+		}
+	}
+}
+
 func TestRequiredDependencies(t *testing.T) {
 	t.Parallel()
 

@@ -145,6 +145,59 @@
         }
       }
     },
+    "forbiddenTo": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular-expression templates matched against the imported path, or the module-relative package path when reachable is present."
+        },
+        "pathNot": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular-expression templates that exclude imported paths, or module-relative package paths when reachable is present."
+        },
+        "reachable": {
+          "type": "boolean",
+          "description": "Matches packages by transitive reachability in the local dependency graph. True reports reachable targets; false reports unreachable targets."
+        },
+        "dependencyTypes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dependencyType"
+          }
+        },
+        "dependencyTypesNot": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/dependencyType"
+          }
+        }
+      },
+      "dependentSchemas": {
+        "reachable": {
+          "required": [
+            "path"
+          ],
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "dependencyTypes"
+                ]
+              },
+              {
+                "required": [
+                  "dependencyTypesNot"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
     "forbiddenRule": {
       "type": "object",
       "additionalProperties": false,
@@ -168,7 +221,7 @@
           "$ref": "#/$defs/from"
         },
         "to": {
-          "$ref": "#/$defs/to"
+          "$ref": "#/$defs/forbiddenTo"
         }
       }
     },

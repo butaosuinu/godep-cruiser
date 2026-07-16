@@ -42,6 +42,7 @@ func TestViolationCorpus(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Evaluate() error = %v", err)
 			}
+			assertReachabilityCorpusKinds(t, fixture.ID, violations)
 
 			got := projectCorpusViolations(violations)
 			if !reflect.DeepEqual(got, fixture.Violations) {
@@ -55,6 +56,8 @@ func corpusConfigurations() map[string]config.Config {
 	orphan := true
 	lessThanTwo := 2
 	moreThanTwo := 2
+	reachable := true
+	unreachable := false
 
 	return map[string]config.Config{
 		"baseline-expiry": {
@@ -134,6 +137,17 @@ func corpusConfigurations() map[string]config.Config {
 				To: config.To{},
 			}},
 		},
+		"reachable-test-helper": {
+			Forbidden: []config.ForbiddenRule{{
+				Name:     "production-no-testutil",
+				Severity: config.SeverityError,
+				From:     config.From{Path: []string{`^internal/app/`}},
+				To: config.To{
+					Path:      []string{`^internal/testutil$`},
+					Reachable: &reachable,
+				},
+			}},
+		},
 		"required-dependency": {
 			Required: []config.RequiredRule{{
 				Name:     "handler-requires-logging",
@@ -191,6 +205,46 @@ func corpusConfigurations() map[string]config.Config {
 			}},
 			AllowedSeverity: config.SeverityError,
 		},
+		"unreachable-dead-code": {
+			Forbidden: []config.ForbiddenRule{{
+				Name:     "entrypoint-reaches-production",
+				Severity: config.SeverityError,
+				From:     config.From{Path: []string{`^cmd/app/`}},
+				To: config.To{
+					Path:      []string{`^internal/`},
+					Reachable: &unreachable,
+				},
+			}},
+		},
+	}
+}
+
+func assertReachabilityCorpusKinds(t *testing.T, fixtureID string, violations []Violation) {
+	t.Helper()
+
+	switch fixtureID {
+	case "reachable-test-helper":
+		for _, violation := range violations {
+			if violation.Kind != ViolationKindReachable {
+				t.Errorf("reachable corpus violation kind = %q, want %q", violation.Kind, ViolationKindReachable)
+			}
+			if violation.To == nil {
+				t.Error("reachable corpus violation To = nil, want package target")
+				continue
+			}
+			if violation.To.ImportPath != "" {
+				t.Errorf("reachable corpus violation ImportPath = %q, want empty", violation.To.ImportPath)
+			}
+		}
+	case "unreachable-dead-code":
+		for _, violation := range violations {
+			if violation.Kind != ViolationKindUnreachable {
+				t.Errorf("unreachable corpus violation kind = %q, want %q", violation.Kind, ViolationKindUnreachable)
+			}
+			if violation.To != nil {
+				t.Errorf("unreachable corpus violation To = %#v, want nil", violation.To)
+			}
+		}
 	}
 }
 

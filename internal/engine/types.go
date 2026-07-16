@@ -19,6 +19,12 @@ const (
 	ViolationKindNotAllowed ViolationKind = NotInAllowedRuleName
 	// ViolationKindRequired identifies a source missing a required dependency.
 	ViolationKindRequired ViolationKind = "required"
+	// ViolationKindReachable identifies a package transitively reachable from a
+	// matching source file's local imports.
+	ViolationKindReachable ViolationKind = "reachable"
+	// ViolationKindUnreachable identifies a source whose package is not reachable
+	// from the matching seed packages.
+	ViolationKindUnreachable ViolationKind = "unreachable"
 )
 
 // Source identifies the importing file and source position of a violation.
@@ -33,7 +39,8 @@ type Dependency struct {
 	// Path is the normalized resolver path, or ImportPath when resolution has
 	// no path.
 	Path string
-	// ImportPath is the path exactly as declared in the source file.
+	// ImportPath is the path exactly as declared in the source file. It is empty
+	// for reachable violations, whose target is a synthesized package node.
 	ImportPath string
 	Type       scanner.DependencyType
 }

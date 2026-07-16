@@ -5,7 +5,7 @@ Validate dependency rules for Go source trees.
 godep-cruiser is a clean-room Go reimplementation of the concepts in
 [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) by
 Sander Verweij — forbidden/allowed/required rules with regex `path` / `pathNot`
-matching at file granularity, dependency-type classification
+matching, transitive reachability checks, dependency-type classification
 (stdlib / in-module / third-party / unresolved), and a violation baseline.
 It adds one thing the original does not have: stale baseline entries fail
 the run, so grandfathered exceptions expire automatically when the
@@ -122,6 +122,15 @@ source-only violation when none of that file's imports matches `to`. An
 importless matching file therefore violates the rule. `from: {}` is a
 catch-all; `to: {}` and `from.orphan` are invalid for required rules.
 
+A forbidden rule can set `to.reachable` to evaluate the local package graph.
+`true` reports each matching target package reachable from a matching file's
+local imports; the diagnostic line identifies the import that starts the path.
+`false` treats packages containing matching files as entry points and reports
+every file in a matching target package outside their transitive closure. Both
+forms require `to.path`, allow `to.pathNot`, and reject dependency-type fields.
+Capture references remain available for `true` but are invalid for `false`;
+allowed and required rules do not accept `reachable`.
+
 ## Library API
 
 The public facade is importable independently of the CLI. Configuration load,
@@ -170,10 +179,12 @@ A baseline is a strict JSON document containing exact violation keys:
 }
 ```
 
-For an import edge, the key is `rule` + `from` + `to`, where `to` is the raw
-import path written in the Go source rather than a resolved path. Source-only
-violations such as orphan, package-name, and required rules omit `to` and match
-on the pair `rule` and `from`.
+For an ordinary import edge, the key is `rule` + `from` + `to`, where `to` is
+the raw import path written in the Go source rather than a resolved path. A
+`reachable: true` violation has no single raw target import, so its `to` key is
+the module-relative target package path. Source-only violations such as orphan,
+package-name, required, and `reachable: false` rules omit `to` and match on the
+pair `rule` and `from`.
 
 The baseline has three outcomes:
 

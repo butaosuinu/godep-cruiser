@@ -14,7 +14,8 @@ type Baseline struct {
 }
 
 // BaselineEntry identifies one known violation. To is nil for source-only
-// violations. Resolved paths, lines, severity, and comments are not identities.
+// violations. Ordinary edges use the raw import path; reachable edges use the
+// target package path. Lines, severity, and comments are not identities.
 type BaselineEntry struct {
 	Rule string  `json:"rule"`
 	From string  `json:"from"`
@@ -22,7 +23,8 @@ type BaselineEntry struct {
 }
 
 // GenerateBaseline creates a stable, deduplicated baseline from current
-// violations. Edge entries use the import path as written in source.
+// violations. Ordinary edge entries use the import path as written in source;
+// reachable edge entries use the target package path.
 func GenerateBaseline(violations []Violation) Baseline {
 	return fromInternalBaseline(internalbaseline.Generate(toEngineViolations(violations)))
 }

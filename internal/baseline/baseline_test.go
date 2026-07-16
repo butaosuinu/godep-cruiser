@@ -202,6 +202,89 @@ func TestApplyNumberOfDependentsViolationThreeStates(t *testing.T) {
 	}
 }
 
+func TestApplyReachabilityViolationThreeStates(t *testing.T) {
+	t.Parallel()
+
+	reachable := violation(
+		"production-cannot-reach-testutil",
+		"internal/service/service.go",
+		"",
+		config.SeverityError,
+	)
+	reachable.Kind = engine.ViolationKindReachable
+	reachable.To.Path = "internal/testutil"
+	reachable.To.Type = scanner.DependencyTypeLocal
+	unreachable := sourceViolation("entrypoints-reach-production", "internal/dead/dead.go")
+	unreachable.Kind = engine.ViolationKindUnreachable
+
+	tests := []struct {
+		name    string
+		current engine.Violation
+		entry   baseline.Entry
+	}{
+		{
+			name:    "reachable package path identity",
+			current: reachable,
+			entry: baseline.Entry{
+				Rule: reachable.Rule,
+				From: reachable.From.Path,
+				To:   stringPointer(reachable.To.Path),
+			},
+		},
+		{
+			name:    "unreachable source-only identity",
+			current: unreachable,
+			entry: baseline.Entry{
+				Rule: unreachable.Rule,
+				From: unreachable.From.Path,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			generated := baseline.Generate([]engine.Violation{test.current})
+			if want := (baseline.Baseline{Entries: []baseline.Entry{test.entry}}); !reflect.DeepEqual(generated, want) {
+				t.Fatalf("Generate() = %#v, want %#v", generated, want)
+			}
+
+			states := []struct {
+				name     string
+				baseline baseline.Baseline
+				current  []engine.Violation
+				want     baseline.Result
+			}{
+				{
+					name:    "new",
+					current: []engine.Violation{test.current},
+					want:    baseline.Result{Violations: []engine.Violation{test.current}},
+				},
+				{
+					name:     "known",
+					baseline: generated,
+					current:  []engine.Violation{test.current},
+					want:     baseline.Result{Known: []engine.Violation{test.current}},
+				},
+				{
+					name:     "stale",
+					baseline: generated,
+					want:     baseline.Result{Stale: []baseline.StaleError{{Entry: test.entry}}},
+				},
+			}
+			for _, state := range states {
+				t.Run(state.name, func(t *testing.T) {
+					t.Parallel()
+
+					if got := baseline.Apply(state.baseline, state.current); !reflect.DeepEqual(got, state.want) {
+						t.Fatalf("Apply() = %#v, want %#v", got, state.want)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestApplyUsesOnlyExactIdentityKeys(t *testing.T) {
 	t.Parallel()
 
