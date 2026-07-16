@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"regexp"
+	"slices"
 
 	"github.com/butaosuinu/godep-cruiser/config"
 	"github.com/butaosuinu/godep-cruiser/internal/scanner"
@@ -260,13 +261,7 @@ func matchesAnyTemplate(patterns []string, value string, captures []string) (boo
 }
 
 func containsDependencyType(types []config.DependencyType, dependencyType scanner.DependencyType) bool {
-	for _, candidate := range types {
-		if string(candidate) == string(dependencyType) {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(types, dependencyType)
 }
 
 func isSourceOnly(from config.From, to config.To) bool {

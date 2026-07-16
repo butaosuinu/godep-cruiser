@@ -21,8 +21,8 @@ const (
 // selected representation. Baseline-known violations remain suppressed.
 func WriteReport(writer io.Writer, outputType OutputType, result Result) error {
 	report := reporter.Report{
-		Violations: toEngineViolations(result.Violations),
-		Stale:      toInternalStaleErrors(result.Stale),
+		Violations: result.Violations,
+		Stale:      result.Stale,
 	}
 
 	switch outputType {
