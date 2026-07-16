@@ -21,12 +21,14 @@ func WriteErrReport(writer io.Writer, report Report) error {
 		var diagnostic strings.Builder
 		fmt.Fprintf(
 			&diagnostic,
-			"[%s] rule %q: %s:%d",
+			"[%s] rule %q: %s",
 			singleLine(string(violation.Severity)),
 			violation.Rule,
 			singleLine(violation.From.Path),
-			violation.From.Line,
 		)
+		if violation.From.Line != 0 {
+			fmt.Fprintf(&diagnostic, ":%d", violation.From.Line)
+		}
 		if violation.To == nil {
 			fmt.Fprintf(&diagnostic, ": %s\n", sourceReason(violation.Kind))
 		} else {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/butaosuinu/godep-cruiser/main/schema/godep-cruiser.schema.json",
-  "title": "godep-cruiser v0.2 configuration",
+  "title": "godep-cruiser v0.3 configuration",
   "description": "Dependency rules for Go source trees. Regular expressions use Go regexp syntax.",
   "type": "object",
   "additionalProperties": false,
@@ -43,6 +43,13 @@
         "ignore"
       ]
     },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "module",
+        "folder"
+      ]
+    },
     "dependencyType": {
       "type": "string",
       "enum": [
@@ -73,11 +80,11 @@
       "properties": {
         "path": {
           "$ref": "#/$defs/regexArray",
-          "description": "Regular expressions matched against the importing file path. Captures supply $1, $2, and later references in to.path and to.pathNot."
+          "description": "Regular expressions matched against the importing file path, or the source package's module-relative path for folder-scoped forbidden rules. Captures supply $1, $2, and later references in to.path and to.pathNot."
         },
         "pathNot": {
           "$ref": "#/$defs/regexArray",
-          "description": "Regular expressions that exclude importing file paths."
+          "description": "Regular expressions that exclude importing file paths, or module-relative source package paths for folder-scoped forbidden rules."
         },
         "orphan": {
           "type": "boolean",
@@ -151,11 +158,11 @@
       "properties": {
         "path": {
           "$ref": "#/$defs/regexArray",
-          "description": "Regular-expression templates matched against the imported path, or the module-relative package path when reachable is present."
+          "description": "Regular-expression templates matched against the imported path, or the module-relative package path for reachable and folder-scoped forbidden rules."
         },
         "pathNot": {
           "$ref": "#/$defs/regexArray",
-          "description": "Regular-expression templates that exclude imported paths, or module-relative package paths when reachable is present."
+          "description": "Regular-expression templates that exclude imported paths, or module-relative package paths for reachable and folder-scoped forbidden rules."
         },
         "reachable": {
           "type": "boolean",
@@ -217,13 +224,73 @@
           "$ref": "#/$defs/severity",
           "default": "warn"
         },
+        "scope": {
+          "$ref": "#/$defs/scope",
+          "description": "Evaluation coordinate for this forbidden rule. Module evaluates source-file import edges; folder evaluates local package graph edges.",
+          "default": "module"
+        },
         "from": {
           "$ref": "#/$defs/from"
         },
         "to": {
           "$ref": "#/$defs/forbiddenTo"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "scope": {
+                "const": "folder"
+              }
+            },
+            "required": [
+              "scope"
+            ]
+          },
+          "then": {
+            "properties": {
+              "from": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "orphan"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "packageName"
+                      ]
+                    }
+                  ]
+                }
+              },
+              "to": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "reachable"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "dependencyTypes"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "dependencyTypesNot"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "allowedRule": {
       "type": "object",

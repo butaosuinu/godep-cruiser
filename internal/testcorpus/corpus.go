@@ -27,14 +27,16 @@ var sourceOnlyRuleNames = map[string]struct{}{
 	"package-main-placement":        {},
 }
 
-// Location identifies a module-relative source location.
+// Location identifies a module-relative source location. Folder-scoped package
+// edges use a package path with line zero.
 type Location struct {
 	Path string `json:"path"`
 	Line int    `json:"line"`
 }
 
-// Dependency identifies an import edge's comparison target. Path is the
-// normalized resolver path, or the raw source path when resolution has no path.
+// Dependency identifies an edge's comparison target. Path is the normalized
+// resolver path, the raw source path when resolution has no path, or a
+// module-relative package path for folder-scoped edges.
 type Dependency struct {
 	Path           string `json:"path"`
 	DependencyType string `json:"dependencyType"`
@@ -288,6 +290,9 @@ func validateViolation(moduleDir string, violation ExpectedViolation) error {
 		return err
 	}
 	if _, sourceOnly := sourceOnlyRuleNames[violation.Rule]; sourceOnly {
+		if violation.From.Line == 0 {
+			return fmt.Errorf("source-only rule %q must use a Go source location", violation.Rule)
+		}
 		if violation.To != nil {
 			return fmt.Errorf("source-only rule %q must not set to", violation.Rule)
 		}
@@ -296,7 +301,13 @@ func validateViolation(moduleDir string, violation ExpectedViolation) error {
 	if violation.To == nil {
 		return fmt.Errorf("edge rule %q must set to", violation.Rule)
 	}
-	return validateDependency(*violation.To)
+	if err := validateDependency(*violation.To); err != nil {
+		return err
+	}
+	if violation.From.Line == 0 && violation.To.DependencyType != "local" {
+		return fmt.Errorf("folder-scoped edge rule %q must target a local package", violation.Rule)
+	}
+	return nil
 }
 
 func validatePositiveControl(moduleDir string, control PositiveControl) error {
@@ -312,6 +323,9 @@ func validatePositiveControl(moduleDir string, control PositiveControl) error {
 		return errors.New("exactly one of to or packageName must be set")
 	}
 	if control.Rule == "package-main-placement" {
+		if control.From.Line == 0 {
+			return errors.New("package-main-placement positive control must use a Go source location")
+		}
 		if !hasPackageName {
 			return errors.New("package-main-placement positive control must set packageName, not to")
 		}
@@ -323,10 +337,29 @@ func validatePositiveControl(moduleDir string, control PositiveControl) error {
 	if !hasDependency {
 		return fmt.Errorf("edge rule %q positive control must set to, not packageName", control.Rule)
 	}
-	return validateDependency(*control.To)
+	if err := validateDependency(*control.To); err != nil {
+		return err
+	}
+	if control.From.Line == 0 && control.To.DependencyType != "local" {
+		return fmt.Errorf("folder-scoped edge rule %q positive control must target a local package", control.Rule)
+	}
+	return nil
 }
 
 func validateLocation(moduleDir string, location Location) error {
+	if location.Line == 0 {
+		if !validPackagePath(location.Path) {
+			return fmt.Errorf("from.path %q is not a module-relative package path", location.Path)
+		}
+		info, err := os.Stat(filepath.Join(moduleDir, filepath.FromSlash(location.Path)))
+		if err != nil {
+			return fmt.Errorf("from.path: stat package directory: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("from.path %q is not a package directory", location.Path)
+		}
+		return nil
+	}
 	if !validGoPath(location.Path) {
 		return fmt.Errorf("from.path %q is not a module-relative .go path", location.Path)
 	}
@@ -354,6 +387,10 @@ func validateDependency(dependency Dependency) error {
 
 func validGoPath(filename string) bool {
 	return validRelativePath(filename) && path.Ext(filename) == ".go"
+}
+
+func validPackagePath(packagePath string) bool {
+	return fs.ValidPath(packagePath) && path.Clean(packagePath) == packagePath
 }
 
 func validRelativePath(filename string) bool {

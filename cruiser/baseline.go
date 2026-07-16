@@ -12,13 +12,13 @@ import (
 type Baseline = baseline.Baseline
 
 // BaselineEntry identifies one known violation. To is nil for source-only
-// violations. Ordinary edges use the raw import path; reachable edges use the
-// target package path. Lines, severity, and comments are not identities.
+// violations. Edges with a raw import path use it; synthesized package edges
+// use the target package path. Lines, severity, and comments are not identities.
 type BaselineEntry = baseline.Entry
 
 // GenerateBaseline creates a stable, deduplicated baseline from current
-// violations. Ordinary edge entries use the import path as written in source;
-// reachable edge entries use the target package path.
+// violations. Entries use the import path as written in source when present,
+// and otherwise use the target package path.
 func GenerateBaseline(violations []Violation) Baseline {
 	return baseline.Generate(violations)
 }

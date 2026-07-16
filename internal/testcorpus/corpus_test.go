@@ -29,6 +29,7 @@ func TestViolationCorpus(t *testing.T) {
 
 	wantIDs := []string{
 		"baseline-expiry",
+		"folder-scope",
 		"forbidden-import-target",
 		"layer-direction",
 		"number-of-dependents",
@@ -157,6 +158,10 @@ func assertGoldenLocations(t *testing.T, fixture Case, files map[string]parsedFi
 }
 
 func validateGoldenLocation(violation ExpectedViolation, files map[string]parsedFile) error {
+	if violation.From.Line == 0 {
+		return validatePackageEdgeLocation(violation.Rule, violation.From, violation.To, files)
+	}
+
 	file, ok := files[violation.From.Path]
 	if !ok {
 		return fmt.Errorf("golden from.path %q was not parsed", violation.From.Path)
@@ -196,6 +201,47 @@ func validateGoldenLocation(violation ExpectedViolation, files map[string]parsed
 		)
 	}
 	return nil
+}
+
+func validatePackageEdgeLocation(
+	rule string,
+	from Location,
+	to *Dependency,
+	files map[string]parsedFile,
+) error {
+	if to == nil {
+		return fmt.Errorf("folder-scoped golden %s has no package target", rule)
+	}
+	if to.DependencyType != string(scanner.DependencyTypeLocal) {
+		return fmt.Errorf(
+			"folder-scoped golden %s target %q has dependency type %q, want local",
+			rule,
+			to.Path,
+			to.DependencyType,
+		)
+	}
+
+	foundPackage := false
+	for _, sourcePath := range sortedFilePaths(files) {
+		if path.Dir(sourcePath) != from.Path {
+			continue
+		}
+		foundPackage = true
+		if slices.ContainsFunc(files[sourcePath].imports, func(found parsedImport) bool {
+			return found.path == to.Path && found.dependencyType == string(scanner.DependencyTypeLocal)
+		}) {
+			return nil
+		}
+	}
+	if !foundPackage {
+		return fmt.Errorf("folder-scoped golden %s source package %q was not parsed", rule, from.Path)
+	}
+	return fmt.Errorf(
+		"folder-scoped golden %s target package %q is not a local dependency of %q",
+		rule,
+		to.Path,
+		from.Path,
+	)
 }
 
 func validateReachableGoldenLocation(
@@ -391,6 +437,10 @@ func assertPositiveControlLocations(t *testing.T, fixture Case, files map[string
 }
 
 func validatePositiveControlLocation(control PositiveControl, files map[string]parsedFile) error {
+	if control.From.Line == 0 {
+		return validatePackageEdgeLocation(control.Rule, control.From, control.To, files)
+	}
+
 	file, ok := files[control.From.Path]
 	if !ok {
 		return fmt.Errorf("positive control from.path %q was not parsed", control.From.Path)
@@ -527,6 +577,36 @@ func TestValidateGoldenLocation(t *testing.T) {
 		},
 		"internal/testutil/testutil.go": {packageName: "testutil", packageLine: 1},
 	}
+	folderEdge := ExpectedViolation{
+		Rule:     "app-no-blocked",
+		Severity: "warn",
+		From:     Location{Path: "internal/app", Line: 0},
+		To: &Dependency{
+			Path:           "internal/blocked",
+			DependencyType: string(scanner.DependencyTypeLocal),
+		},
+	}
+	folderFiles := map[string]parsedFile{
+		"internal/app/first.go": {
+			packageName: "app",
+			packageLine: 1,
+			imports: []parsedImport{{
+				path:           "internal/blocked",
+				dependencyType: string(scanner.DependencyTypeLocal),
+				line:           3,
+			}},
+		},
+		"internal/app/second.go": {
+			packageName: "app",
+			packageLine: 1,
+			imports: []parsedImport{{
+				path:           "internal/blocked",
+				dependencyType: string(scanner.DependencyTypeLocal),
+				line:           3,
+			}},
+		},
+		"internal/blocked/blocked.go": {packageName: "blocked", packageLine: 1},
+	}
 	tests := []struct {
 		name      string
 		violation ExpectedViolation
@@ -624,6 +704,33 @@ func TestValidateGoldenLocation(t *testing.T) {
 			},
 			files:     reachableFiles,
 			wantError: "does not match an import",
+		},
+		{
+			name:      "folder edge accepts a deduplicated local package dependency",
+			violation: folderEdge,
+			files:     folderFiles,
+		},
+		{
+			name: "folder edge rejects a missing package dependency",
+			violation: ExpectedViolation{
+				Rule:     folderEdge.Rule,
+				Severity: folderEdge.Severity,
+				From:     folderEdge.From,
+				To: &Dependency{
+					Path:           "internal/missing",
+					DependencyType: string(scanner.DependencyTypeLocal),
+				},
+			},
+			files:     folderFiles,
+			wantError: "is not a local dependency",
+		},
+		{
+			name:      "folder edge rejects a missing source package",
+			violation: folderEdge,
+			files: map[string]parsedFile{
+				"internal/blocked/blocked.go": {packageName: "blocked", packageLine: 1},
+			},
+			wantError: "source package \"internal/app\" was not parsed",
 		},
 	}
 
@@ -834,6 +941,8 @@ func TestValidateViolationRuleShape(t *testing.T) {
 	}
 	location := Location{Path: "source.go", Line: 1}
 	edge := &Dependency{Path: "fmt", DependencyType: "stdlib"}
+	folderLocation := Location{Path: ".", Line: 0}
+	localPackage := &Dependency{Path: "internal/target", DependencyType: "local"}
 	tests := []struct {
 		name      string
 		violation ExpectedViolation
@@ -847,6 +956,15 @@ func TestValidateViolationRuleShape(t *testing.T) {
 			name:      "edge rule rejects source-only shape",
 			violation: ExpectedViolation{Rule: "rule", Severity: "error", From: location},
 			wantError: `edge rule "rule" must set to`,
+		},
+		{
+			name:      "folder edge keeps a local package target",
+			violation: ExpectedViolation{Rule: "rule", Severity: "error", From: folderLocation, To: localPackage},
+		},
+		{
+			name:      "folder edge rejects a non-local target",
+			violation: ExpectedViolation{Rule: "rule", Severity: "error", From: folderLocation, To: edge},
+			wantError: `folder-scoped edge rule "rule" must target a local package`,
 		},
 		{
 			name:      "package main rule stays source-only",
@@ -930,6 +1048,7 @@ func TestValidatePositiveControl(t *testing.T) {
 		t.Fatalf("write source.go: %v", err)
 	}
 	location := Location{Path: "source.go", Line: 1}
+	folderLocation := Location{Path: ".", Line: 0}
 	tests := []struct {
 		name      string
 		control   PositiveControl
@@ -941,6 +1060,14 @@ func TestValidatePositiveControl(t *testing.T) {
 				Rule: "rule",
 				From: location,
 				To:   &Dependency{Path: "fmt", DependencyType: "stdlib"},
+			},
+		},
+		{
+			name: "folder edge control",
+			control: PositiveControl{
+				Rule: "rule",
+				From: folderLocation,
+				To:   &Dependency{Path: "internal/target", DependencyType: "local"},
 			},
 		},
 		{

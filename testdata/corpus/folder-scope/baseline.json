@@ -1,0 +1,14 @@
+{
+  "entries": [
+    {
+      "rule": "app-no-blocked",
+      "from": "internal/app",
+      "to": "internal/blocked/known"
+    },
+    {
+      "rule": "app-no-blocked",
+      "from": "internal/app",
+      "to": "internal/blocked/removed"
+    }
+  ]
+}

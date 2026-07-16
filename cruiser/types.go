@@ -37,11 +37,13 @@ const (
 	ViolationKindUnreachable ViolationKind = engine.ViolationKindUnreachable
 )
 
-// Source identifies the importing file and source position of a violation.
+// Source identifies the importing source of a violation. Folder-scoped
+// violations use a package path with line zero and an empty package name.
 type Source = engine.Source
 
-// Dependency identifies the imported target of an edge violation. Path is the
-// normalized dependency path and ImportPath is the path declared by the source.
+// Dependency identifies the imported target of an edge violation. ImportPath
+// is empty when the target is a synthesized package node, as with reachable and
+// folder-scoped violations.
 type Dependency = engine.Dependency
 
 // Violation describes one unsuppressed or baseline-known rule violation. To is

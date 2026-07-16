@@ -35,6 +35,7 @@ type compiledForbiddenRule struct {
 	name       string
 	comment    string
 	severity   config.Severity
+	scope      config.Scope
 	from       fromMatcher
 	to         toMatcher
 	sourceOnly bool
@@ -69,6 +70,7 @@ func compileForbiddenRules(rules []config.ForbiddenRule) ([]compiledForbiddenRul
 			name:       rule.Name,
 			comment:    rule.Comment,
 			severity:   severity,
+			scope:      rule.Scope,
 			from:       from,
 			to:         compileTo(rule.To),
 			sourceOnly: isSourceOnly(rule.From, rule.To),

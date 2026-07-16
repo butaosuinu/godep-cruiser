@@ -27,7 +27,8 @@ const (
 	ViolationKindUnreachable ViolationKind = "unreachable"
 )
 
-// Source identifies the importing file and source position of a violation.
+// Source identifies the importing source of a violation. Folder-scoped
+// violations use a package path with line zero and an empty package name.
 type Source struct {
 	Path        string
 	Line        int
@@ -40,7 +41,8 @@ type Dependency struct {
 	// no path.
 	Path string
 	// ImportPath is the path exactly as declared in the source file. It is empty
-	// for reachable violations, whose target is a synthesized package node.
+	// when the target is a synthesized package node, as with reachable and
+	// folder-scoped violations.
 	ImportPath string
 	Type       scanner.DependencyType
 }

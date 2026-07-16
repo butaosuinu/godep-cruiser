@@ -41,8 +41,8 @@ godep-cruiser --config godep-cruiser.json --scan-root . --output-type mermaid
 
 In JSON reports, `violations[].kind` is one of:
 
-- `forbidden` for an ordinary forbidden-rule match, including source-only
-  orphan, package-name, and dependent-count checks
+- `forbidden` for a forbidden-rule match, including folder-scoped package
+  edges and source-only orphan, package-name, and dependent-count checks
 - `not-in-allowed` for a dependency that matches no allowed rule
 - `required` for a source file missing a required import
 - `reachable` for a matching package that is transitively reachable
@@ -78,7 +78,7 @@ gap with a rules model proven by dependency-cruiser.
 
 ## Configuration
 
-v0.2 configuration is JSON-only so the runtime remains standard-library-only.
+v0.3 configuration is JSON-only so the runtime remains standard-library-only.
 The published [JSON Schema](schema/godep-cruiser.schema.json) describes every
 accepted field; the loader also validates Go regular expressions, numeric
 capture references, unknown fields, and source positions.
@@ -118,6 +118,17 @@ capture references, unknown fields, and source positions.
         "numberOfDependentsLessThan": 2
       },
       "to": {}
+    },
+    {
+      "name": "core-packages-do-not-import-adapters",
+      "severity": "error",
+      "scope": "folder",
+      "from": {
+        "path": ["^internal/core(?:/|$)"]
+      },
+      "to": {
+        "path": ["^internal/adapters(?:/|$)"]
+      }
     }
   ],
   "required": [
@@ -150,6 +161,17 @@ capture references, unknown fields, and source positions.
 references in `to.path` and `to.pathNot`. See
 [DESIGN.ja.md](DESIGN.ja.md#設定形式と-loader) for the matching and validation
 semantics.
+
+A forbidden rule's optional `scope` is `module` by default. The default scope
+matches individual source files and imports. `scope: "folder"` instead matches
+`from.path` and `to.path` against module-relative package paths (`.` is the
+module root) and reports one violation per distinct local package edge. A
+folder-scoped violation has the source package path in `from.path`, line `0`,
+an empty package name, and a local target package with no raw import path.
+Folder scope is available only to forbidden rules. It rejects
+`dependencyTypes`, `dependencyTypesNot`, `from.orphan`, `from.packageName`, and
+`to.reachable`; dependent-count conditions and `from.path` capture references
+in `to` remain available.
 
 Each `required` rule checks every file matching `from` and reports one
 source-only violation when none of that file's imports matches `to`. An
@@ -243,9 +265,10 @@ A baseline is a strict JSON document containing exact violation keys:
 For an ordinary import edge, the key is `rule` + `from` + `to`, where `to` is
 the raw import path written in the Go source rather than a resolved path. A
 `reachable: true` violation has no single raw target import, so its `to` key is
-the module-relative target package path. Source-only violations such as orphan,
-package-name, dependent-count, required, and `reachable: false` rules omit `to`
-and match on the pair `rule` and `from`.
+the module-relative target package path. A folder-scoped package edge likewise
+uses module-relative package paths for both `from` and `to`. Source-only
+violations such as orphan, package-name, dependent-count, required, and
+`reachable: false` rules omit `to` and match on the pair `rule` and `from`.
 
 The baseline has three outcomes:
 
