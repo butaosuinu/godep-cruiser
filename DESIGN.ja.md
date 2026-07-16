@@ -334,17 +334,15 @@ GOTOOLCHAIN=go1.25.8 GOCACHE="$PWD/.cache/go-build" \
 ### 配布: library-first + 薄い CLI
 
 エンジンを importable package として設計し、CLI は薄い wrapper にする。
-`go test` から `archtest.Check(t, cfg)` の形で呼べる helper への道を残す
-(helper 自体は v0.1 必須ではない)。golangci-lint plugin は対象外
-(module plugin の制約が重く、需要が見えてから)。
+`go test` からは `archtest.Check(t, cfg, opts)` の形で同じ検証経路を呼べる。
+golangci-lint plugin は対象外とする(module plugin の制約が重く、需要が見えてから)。
 
 公開 facade は `github.com/butaosuinu/godep-cruiser/cruiser` とする。
 `Validate` は programmatic な設定も loader と同じ規則で検証したうえで、明示した
 scan root と単一の `go.mod` から scan・rule 評価・任意の baseline 適用を合成し、
 未抑止違反・known 違反・stale entry を分けた `Result` を返す。
 reporter はこの `Result` を受け、known を出力せず、stale は常に error として err / JSON /
-Mermaid の各形式と summary に含める。API は `os.Exit` や暗黙の出力先に依存しないため、
-v0.3 の `archtest.Check` は同じ経路の薄い adapter として追加できる。
+Mermaid の各形式と summary に含める。API は `os.Exit` や暗黙の出力先に依存しない。
 
 JSON report の `violations[].kind` は `forbidden`、`not-in-allowed`、`required`、`reachable`、`unreachable` の 5 値とする。
 `not-in-allowed` は allowed 未一致、`required` は必須 import の欠落、`reachable` と `unreachable` はそれぞれ `to.reachable` の `true` と `false` に対応する。
@@ -362,6 +360,26 @@ scan・出力失敗は exit 2 とする。上限により Unix 系で 256 の倍
 `go install github.com/butaosuinu/godep-cruiser@latest` を成立させるため、module root は
 共有 CLI runner を呼ぶだけの `package main` とする。`cmd/godep-cruiser` も同じ runner を呼ぶ
 互換 entrypoint とし、検証ロジックはどちらの `package main` にも置かない。
+
+### archtest: go test helper (v0.3)
+
+公開 package `github.com/butaosuinu/godep-cruiser/archtest` は、次の単一 API を持つ。
+
+```go
+func Check(tb testing.TB, configuration *config.Config, options cruiser.Options)
+```
+
+`Check` は最初に `tb.Helper()` を呼び、受け取った `cruiser.Options` を変更せず
+`cruiser.Validate` に渡す。helper 専用の Options 型や別の検証経路は作らない。
+設定の不正、go.mod からの resolver 初期化、scan、rule 評価、baseline 検証に失敗した場合は
+`tb.Fatalf` で停止する。検証を実行できなかった状態を通常 return にすると、依存規則を
+検査していないテストが pass に見えるため、ここは fail-closed とする。
+
+検証できた場合は `cruiser.WriteReport` と `cruiser.OutputTypeErr` で全診断を buffer に
+まとめる。`result.ErrorCount() > 0`、すなわち未抑止の error severity 違反または stale
+baseline entry がある場合は、1 回の `tb.Errorf` でまとめて失敗を報告する。
+error を含まない warn / info 診断は 1 回の `tb.Logf` に渡し、テストを失敗させない。
+baseline-known 違反は既存 reporter の契約どおり出力しない。
 
 ## MVP スコープ(v0.1)
 

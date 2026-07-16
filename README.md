@@ -199,6 +199,27 @@ Import `github.com/butaosuinu/godep-cruiser/config` and
 `Options.GoModPath` when the module file is not `<ScanRoot>/go.mod`; no
 `go.work` or nested-module discovery is performed.
 
+### Go test helper
+
+Dependency validation can run as an ordinary Go test. Place a test like this in
+the module root:
+
+```go
+func TestArchitecture(t *testing.T) {
+	configuration, err := config.LoadFile("godep-cruiser.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	archtest.Check(t, configuration, cruiser.Options{ScanRoot: "."})
+}
+```
+
+Import `github.com/butaosuinu/godep-cruiser/archtest` in addition to `config`
+and `cruiser`. Error-severity violations and stale baseline entries fail the
+test. A run containing only warning or informational violations is logged
+without failing it; configuration and scan errors stop the test with `Fatalf`.
+
 ## Baseline
 
 A baseline is a strict JSON document containing exact violation keys:
