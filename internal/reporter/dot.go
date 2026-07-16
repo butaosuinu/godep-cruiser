@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 
 	"github.com/butaosuinu/godep-cruiser/internal/engine"
 )
@@ -78,6 +79,11 @@ func escapeDOTQuotedString(value string) string {
 		case '\r':
 			escaped.WriteString(`\r`)
 		default:
+			if unicode.IsControl(character) {
+				fmt.Fprintf(&escaped, "[U+%04X]", character)
+
+				continue
+			}
 			escaped.WriteRune(character)
 		}
 	}

@@ -29,7 +29,7 @@ func TestWriteDOTReport(t *testing.T) {
 				To:       dependency,
 			},
 			{
-				Rule:     "no\norphans",
+				Rule:     "no\x00\norphans",
 				Severity: "info",
 				From:     engine.Source{Path: "lonely.go", Line: 1},
 			},
@@ -43,7 +43,7 @@ func TestWriteDOTReport(t *testing.T) {
   node [shape=box];
   n0 [label="internal\\source\"quoted.go"];
   n1 [label="internal\\dep\"quoted (module)"];
-  n2 [label="lonely.go (no\norphans [info] @ line 1)", color="#cf222e", fillcolor="#ffebe9", penwidth=2, style="filled"];
+  n2 [label="lonely.go (no[U+0000]\norphans [info] @ line 1)", color="#cf222e", fillcolor="#ffebe9", penwidth=2, style="filled"];
   stale0 [label="[error] baseline entry is stale: rule \"old\", from \"old.go\"; remove this entry from the baseline.", color="#cf222e", fillcolor="#ffebe9", penwidth=2, style="filled"];
   n0 -> n1 [label="line 7: deny \"quoted\"\\rule [error]; second [warn]", color="#cf222e", penwidth=3];
 }
@@ -91,6 +91,11 @@ func TestEscapeDOTQuotedString(t *testing.T) {
 		{name: "quote", value: `a"b`, want: `a\"b`},
 		{name: "backslash", value: `a\b`, want: `a\\b`},
 		{name: "line breaks", value: "a\nb\rc", want: `a\nb\rc`},
+		{
+			name:  "other controls",
+			value: "\x00\t\x1f\x7f\u0085",
+			want:  "[U+0000][U+0009][U+001F][U+007F][U+0085]",
+		},
 		{name: "UTF-8", value: "日本語", want: "日本語"},
 	}
 
