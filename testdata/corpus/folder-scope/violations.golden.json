@@ -1,0 +1,29 @@
+{
+  "name": "folder scope: report one forbidden violation per local package edge",
+  "violations": [
+    {
+      "rule": "app-no-blocked",
+      "severity": "warn",
+      "from": {
+        "path": "internal/app",
+        "line": 0
+      },
+      "to": {
+        "path": "internal/blocked/known",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "app-no-blocked",
+      "severity": "warn",
+      "from": {
+        "path": "internal/app",
+        "line": 0
+      },
+      "to": {
+        "path": "internal/blocked/live",
+        "dependencyType": "local"
+      }
+    }
+  ]
+}

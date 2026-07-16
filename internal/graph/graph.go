@@ -76,6 +76,17 @@ func (graph Graph) Dependents(packagePath string) []string {
 	return sortedKeys(graph.reverse[packagePath])
 }
 
+// Dependencies returns the distinct packages directly imported by packagePath.
+// Same-directory imports and non-local imports are excluded.
+func (graph Graph) Dependencies(packagePath string) []string {
+	packagePath, ok := cleanPackagePath(packagePath)
+	if !ok {
+		return nil
+	}
+
+	return sortedKeys(graph.forward[packagePath])
+}
+
 // ForwardClosure returns the known seed packages and every package reachable
 // from them by following local imports. Unknown seeds are ignored.
 func (graph Graph) ForwardClosure(packagePaths ...string) []string {

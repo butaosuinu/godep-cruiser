@@ -1,0 +1,27 @@
+{
+  "violations": [
+    {
+      "rule": "app-no-blocked",
+      "severity": "warn",
+      "from": "internal/app",
+      "to": "internal/blocked/live"
+    }
+  ],
+  "known": [
+    {
+      "rule": "app-no-blocked",
+      "severity": "warn",
+      "from": "internal/app",
+      "to": "internal/blocked/known"
+    }
+  ],
+  "stale": [
+    {
+      "rule": "app-no-blocked",
+      "severity": "error",
+      "from": "internal/app",
+      "to": "internal/blocked/removed",
+      "message": "baseline entry is stale: rule \"app-no-blocked\", from \"internal/app\", to \"internal/blocked/removed\"; remove this entry from the baseline."
+    }
+  ]
+}

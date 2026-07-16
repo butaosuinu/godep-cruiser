@@ -96,6 +96,9 @@ func (validator configValidator) rule(node *jsonNode, path string, kind ruleKind
 	if kind != allowedRuleKind {
 		allowedFields = append(allowedFields, "severity")
 	}
+	if kind == forbiddenRuleKind {
+		allowedFields = append(allowedFields, "scope")
+	}
 	fields, err := validator.object(node, path, allowedFields...)
 	if err != nil {
 		return err
@@ -134,11 +137,19 @@ func (validator configValidator) rule(node *jsonNode, path string, kind ruleKind
 			return validationErr
 		}
 	}
+	ruleScope := ScopeModule
+	if scope, ok := fields["scope"]; ok {
+		ruleScope, err = validator.scope(scope.value, fieldPath(path, "scope"))
+		if err != nil {
+			return err
+		}
+	}
 
 	fromPatterns, err := validator.from(
 		from.value,
 		fieldPath(path, "from"),
 		kind != requiredRuleKind,
+		ruleScope,
 	)
 	if err != nil {
 		return err
@@ -148,6 +159,7 @@ func (validator configValidator) rule(node *jsonNode, path string, kind ruleKind
 		fieldPath(path, "to"),
 		fromPatterns,
 		kind,
+		ruleScope,
 	); err != nil {
 		return err
 	}
@@ -159,6 +171,7 @@ func (validator configValidator) from(
 	node *jsonNode,
 	path string,
 	allowGraphFields bool,
+	ruleScope Scope,
 ) ([]*regexp.Regexp, error) {
 	allowedFields := []string{"path", "pathNot", "packageName"}
 	if allowGraphFields {
@@ -172,6 +185,17 @@ func (validator configValidator) from(
 	fields, validationErr := validator.object(node, path, allowedFields...)
 	if validationErr != nil {
 		return nil, validationErr
+	}
+	if ruleScope == ScopeFolder {
+		for _, conflict := range []string{"orphan", "packageName"} {
+			if member, ok := fields[conflict]; ok {
+				return nil, validator.at(
+					member.value,
+					fieldPath(path, conflict),
+					fmt.Errorf(`field %q cannot be combined with scope "folder"`, conflict),
+				)
+			}
+		}
 	}
 
 	var fromPatterns []*regexp.Regexp
@@ -276,6 +300,7 @@ func (validator configValidator) to(
 	path string,
 	fromPatterns []*regexp.Regexp,
 	kind ruleKind,
+	ruleScope Scope,
 ) error {
 	allowedFields := []string{
 		"path",
@@ -296,6 +321,17 @@ func (validator configValidator) to(
 	}
 	if kind == requiredRuleKind && len(fields) == 0 {
 		return validator.at(node, path, errors.New("must define at least one condition"))
+	}
+	if ruleScope == ScopeFolder {
+		for _, conflict := range []string{"reachable", "dependencyTypes", "dependencyTypesNot"} {
+			if member, ok := fields[conflict]; ok {
+				return validator.at(
+					member.value,
+					fieldPath(path, conflict),
+					fmt.Errorf(`field %q cannot be combined with scope "folder"`, conflict),
+				)
+			}
+		}
 	}
 
 	allowCaptures := true
@@ -467,6 +503,18 @@ func (validator configValidator) severity(node *jsonNode, path string) error {
 	return nil
 }
 
+func (validator configValidator) scope(node *jsonNode, path string) (Scope, error) {
+	if err := validator.kind(node, path, jsonString); err != nil {
+		return "", err
+	}
+	scope := Scope(node.text)
+	if !validScope(scope) {
+		return "", validator.at(node, path, fmt.Errorf("unknown scope %q", node.text))
+	}
+
+	return scope, nil
+}
+
 func (validator configValidator) nonEmptyString(node *jsonNode, path string) error {
 	if err := validator.kind(node, path, jsonString); err != nil {
 		return err
@@ -567,6 +615,15 @@ func (validator configValidator) at(node *jsonNode, path string, err error) *Err
 func validSeverity(severity Severity) bool {
 	switch severity {
 	case SeverityError, SeverityWarn, SeverityInfo, SeverityIgnore:
+		return true
+	default:
+		return false
+	}
+}
+
+func validScope(scope Scope) bool {
+	switch scope {
+	case ScopeModule, ScopeFolder:
 		return true
 	default:
 		return false

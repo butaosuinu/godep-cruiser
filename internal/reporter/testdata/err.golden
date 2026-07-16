@@ -3,3 +3,4 @@
 [warn] rule "not-in-allowed": internal/app/app.go:8 -> internal/misc (local): dependency matches no allowed rule
 [error] rule "main-placement": internal/worker/main.go:1: forbidden source
   fix: move package main under cmd/ or tools/
+[error] rule "ui-cannot-depend-on-data": internal/ui -> internal/data (local): forbidden dependency

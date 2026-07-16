@@ -136,6 +136,16 @@ func TestWriteErrGolden(t *testing.T) {
 			Kind:     engine.ViolationKindForbidden,
 			From:     engine.Source{Path: "internal/worker/main.go", Line: 1},
 		},
+		{
+			Rule:     "ui-cannot-depend-on-data",
+			Severity: "error",
+			Kind:     engine.ViolationKindForbidden,
+			From:     engine.Source{Path: "internal/ui"},
+			To: &engine.Dependency{
+				Path: "internal/data",
+				Type: "local",
+			},
+		},
 	}
 
 	want, err := os.ReadFile("testdata/err.golden")
@@ -150,8 +160,8 @@ func TestWriteErrGolden(t *testing.T) {
 	if !bytes.Equal(got.Bytes(), want) {
 		t.Errorf("WriteErr() = %q, want %q", got.Bytes(), want)
 	}
-	if got := ErrorCount(violations); got != 2 {
-		t.Errorf("ErrorCount() = %d, want 2", got)
+	if got := ErrorCount(violations); got != 3 {
+		t.Errorf("ErrorCount() = %d, want 3", got)
 	}
 }
 

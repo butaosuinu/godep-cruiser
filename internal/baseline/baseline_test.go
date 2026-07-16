@@ -285,6 +285,64 @@ func TestApplyReachabilityViolationThreeStates(t *testing.T) {
 	}
 }
 
+func TestApplyFolderViolationThreeStates(t *testing.T) {
+	t.Parallel()
+
+	current := violation(
+		"ui-cannot-depend-on-data",
+		"internal/ui",
+		"",
+		config.SeverityError,
+	)
+	current.From.Line = 0
+	current.From.PackageName = ""
+	current.To.Path = "internal/data"
+	current.To.Type = scanner.DependencyTypeLocal
+	entry := baseline.Entry{
+		Rule: current.Rule,
+		From: current.From.Path,
+		To:   stringPointer(current.To.Path),
+	}
+	generated := baseline.Generate([]engine.Violation{current})
+	if want := (baseline.Baseline{Entries: []baseline.Entry{entry}}); !reflect.DeepEqual(generated, want) {
+		t.Fatalf("Generate() = %#v, want package edge entry %#v", generated, want)
+	}
+
+	tests := []struct {
+		name     string
+		baseline baseline.Baseline
+		current  []engine.Violation
+		want     baseline.Result
+	}{
+		{
+			name:    "new",
+			current: []engine.Violation{current},
+			want:    baseline.Result{Violations: []engine.Violation{current}},
+		},
+		{
+			name:     "known",
+			baseline: generated,
+			current:  []engine.Violation{current},
+			want:     baseline.Result{Known: []engine.Violation{current}},
+		},
+		{
+			name:     "stale",
+			baseline: generated,
+			want:     baseline.Result{Stale: []baseline.StaleError{{Entry: entry}}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := baseline.Apply(test.baseline, test.current); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("Apply() = %#v, want %#v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestApplyUsesOnlyExactIdentityKeys(t *testing.T) {
 	t.Parallel()
 

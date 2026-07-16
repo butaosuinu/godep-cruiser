@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"path"
 	"slices"
 
 	"github.com/butaosuinu/godep-cruiser/config"
@@ -42,6 +43,18 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 	factsByPath := collectFileFacts(files, packageGraph)
 	violations := make([]Violation, 0)
 	for _, rule := range forbiddenRules {
+		if rule.scope == config.ScopeFolder {
+			violations, err = appendFolderViolations(
+				violations,
+				rule,
+				files,
+				packageGraph,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("forbidden rule %q to: %w", rule.name, err)
+			}
+			continue
+		}
 		if rule.to.reachable != nil {
 			var matchErr error
 			if *rule.to.reachable {
@@ -147,6 +160,64 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 	sortViolations(violations)
 
 	return violations, nil
+}
+
+func appendFolderViolations(
+	violations []Violation,
+	rule compiledForbiddenRule,
+	files []scanner.File,
+	packageGraph graph.Graph,
+) ([]Violation, error) {
+	for _, packagePath := range scannedPackagePaths(files) {
+		captures, matched := rule.from.matches(scanner.File{Path: packagePath}, fileFacts{
+			numberOfDependents: packageGraph.FanIn(packagePath),
+		})
+		if !matched {
+			continue
+		}
+		for _, dependencyPath := range packageGraph.Dependencies(packagePath) {
+			matched, err := rule.to.matchesPackagePath(dependencyPath, captures)
+			if err != nil {
+				return nil, err
+			}
+			if matched {
+				violations = append(violations, folderViolation(rule, packagePath, dependencyPath))
+			}
+		}
+	}
+
+	return violations, nil
+}
+
+func scannedPackagePaths(files []scanner.File) []string {
+	packages := make(map[string]struct{})
+	for _, file := range files {
+		if file.PackagePath == "" {
+			continue
+		}
+		packages[path.Clean(file.PackagePath)] = struct{}{}
+	}
+	packagePaths := make([]string, 0, len(packages))
+	for packagePath := range packages {
+		packagePaths = append(packagePaths, packagePath)
+	}
+	slices.Sort(packagePaths)
+
+	return packagePaths
+}
+
+func folderViolation(rule compiledForbiddenRule, from, to string) Violation {
+	return Violation{
+		Rule:     rule.name,
+		Comment:  rule.comment,
+		Severity: rule.severity,
+		Kind:     ViolationKindForbidden,
+		From:     Source{Path: from},
+		To: &Dependency{
+			Path: to,
+			Type: scanner.DependencyTypeLocal,
+		},
+	}
 }
 
 func appendReachableViolations(

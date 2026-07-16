@@ -26,6 +26,7 @@ func TestLoadValidConfiguration(t *testing.T) {
       "name": "all-fields",
       "comment": "covers every matcher",
       "severity": "error",
+      "scope": "module",
       "from": {
         "path": ["^cmd/([^/]+)/"],
         "pathNot": ["_test\\.go$"],
@@ -85,6 +86,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 				}
 				if allFields.Severity != SeverityError {
 					t.Errorf("Severity = %q, want %q", allFields.Severity, SeverityError)
+				}
+				if allFields.Scope != ScopeModule {
+					t.Errorf("Scope = %q, want %q", allFields.Scope, ScopeModule)
 				}
 				wantSeverities := []Severity{SeverityError, SeverityWarn, SeverityInfo, SeverityIgnore}
 				for index, want := range wantSeverities {
@@ -152,11 +156,59 @@ func TestLoadValidConfiguration(t *testing.T) {
 				if got.Forbidden[0].Severity != SeverityWarn {
 					t.Errorf("default Severity = %q, want %q", got.Forbidden[0].Severity, SeverityWarn)
 				}
+				if got.Forbidden[0].Scope != ScopeModule {
+					t.Errorf("default Scope = %q, want %q", got.Forbidden[0].Scope, ScopeModule)
+				}
 				if got.Forbidden[0].To.Reachable != nil {
 					t.Errorf("default Reachable = %v, want nil", got.Forbidden[0].To.Reachable)
 				}
 				if got.AllowedSeverity != SeverityWarn {
 					t.Errorf("default AllowedSeverity = %q, want %q", got.AllowedSeverity, SeverityWarn)
+				}
+			},
+		},
+		{
+			name: "folder scope allows package fan-in conditions",
+			input: `{
+  "forbidden": [{
+    "name": "folder-fan-in",
+    "scope": "folder",
+    "from": {
+      "numberOfDependentsLessThan": 3,
+      "numberOfDependentsMoreThan": 0
+    },
+    "to": {"path": ["^internal/"]}
+  }]
+}`,
+			check: func(t *testing.T, got *Config) {
+				t.Helper()
+				rule := got.Forbidden[0]
+				if rule.Scope != ScopeFolder {
+					t.Errorf("Scope = %q, want %q", rule.Scope, ScopeFolder)
+				}
+				if rule.From.NumberOfDependentsLessThan == nil ||
+					*rule.From.NumberOfDependentsLessThan != 3 ||
+					rule.From.NumberOfDependentsMoreThan == nil ||
+					*rule.From.NumberOfDependentsMoreThan != 0 {
+					t.Errorf("folder fan-in conditions = %#v, want less than 3 and more than 0", rule.From)
+				}
+			},
+		},
+		{
+			name: "folder scope allows capture expansion",
+			input: `{
+  "forbidden": [{
+    "name": "folder-capture",
+    "scope": "folder",
+    "from": {"path": ["^internal/([^/]+)$"]},
+    "to": {"path": ["^internal/$1/api$"]}
+  }]
+}`,
+			check: func(t *testing.T, got *Config) {
+				t.Helper()
+				rule := got.Forbidden[0]
+				if rule.Scope != ScopeFolder || rule.To.Path[0] != "^internal/$1/api$" {
+					t.Errorf("folder capture rule = %#v", rule)
 				}
 			},
 		},
@@ -290,7 +342,16 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "empty name", input: validRule(`"name":""`), wantPath: "$.forbidden[0].name", wantText: "must not be empty"},
 		{name: "missing from", input: `{"forbidden":[{"name":"x","to":{}}]}`, wantPath: "$.forbidden[0]", wantText: `missing required field "from"`},
 		{name: "missing to", input: `{"forbidden":[{"name":"x","from":{}}]}`, wantPath: "$.forbidden[0]", wantText: `missing required field "to"`},
-		{name: "unknown rule field", input: validRule(`"scope":"module"`), wantPath: "$.forbidden[0].scope", wantText: `unknown field "scope"`},
+		{name: "unknown rule field", input: validRule(`"unexpected":true`), wantPath: "$.forbidden[0].unexpected", wantText: `unknown field "unexpected"`},
+		{name: "allowed scope is unsupported", input: `{"allowed":[{"name":"x","scope":"module","from":{},"to":{}}]}`, wantPath: "$.allowed[0].scope", wantText: `unknown field "scope"`},
+		{name: "required scope is unsupported", input: `{"required":[{"name":"x","scope":"module","from":{},"to":{"path":["a"]}}]}`, wantPath: "$.required[0].scope", wantText: `unknown field "scope"`},
+		{name: "scope must be string", input: validRule(`"scope":null`), wantPath: "$.forbidden[0].scope", wantText: "must be a string"},
+		{name: "unknown scope", input: validRule(`"scope":"package"`), wantPath: "$.forbidden[0].scope", wantText: `unknown scope "package"`},
+		{name: "folder scope rejects orphan", input: `{"forbidden":[{"name":"x","scope":"folder","from":{"orphan":false},"to":{}}]}`, wantPath: "$.forbidden[0].from.orphan", wantText: `cannot be combined with scope "folder"`},
+		{name: "folder scope rejects package name", input: `{"forbidden":[{"name":"x","scope":"folder","from":{"packageName":["main"]},"to":{}}]}`, wantPath: "$.forbidden[0].from.packageName", wantText: `cannot be combined with scope "folder"`},
+		{name: "folder scope rejects reachable", input: `{"forbidden":[{"name":"x","scope":"folder","from":{},"to":{"path":["a"],"reachable":true}}]}`, wantPath: "$.forbidden[0].to.reachable", wantText: `cannot be combined with scope "folder"`},
+		{name: "folder scope rejects dependency types", input: `{"forbidden":[{"name":"x","scope":"folder","from":{},"to":{"dependencyTypes":["local"]}}]}`, wantPath: "$.forbidden[0].to.dependencyTypes", wantText: `cannot be combined with scope "folder"`},
+		{name: "folder scope rejects excluded dependency types", input: `{"forbidden":[{"name":"x","scope":"folder","from":{},"to":{"dependencyTypesNot":["unresolved"]}}]}`, wantPath: "$.forbidden[0].to.dependencyTypesNot", wantText: `cannot be combined with scope "folder"`},
 		{name: "allowed rule severity is unsupported", input: `{"allowed":[{"name":"x","severity":"error","from":{},"to":{}}]}`, wantPath: "$.allowed[0].severity", wantText: `unknown field "severity"`},
 		{name: "required to must define a condition", input: `{"required":[{"name":"x","from":{},"to":{}}]}`, wantPath: "$.required[0].to", wantText: "must define at least one condition"},
 		{name: "required from orphan is unsupported", input: `{"required":[{"name":"x","from":{"orphan":false},"to":{"path":["a"]}}]}`, wantPath: "$.required[0].from.orphan", wantText: `unknown field "orphan"`},
@@ -611,6 +672,7 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		Definitions map[string]struct {
 			Properties       map[string]json.RawMessage `json:"properties"`
 			DependentSchemas map[string]json.RawMessage `json:"dependentSchemas"`
+			AllOf            []json.RawMessage          `json:"allOf"`
 			Enum             []string                   `json:"enum"`
 			Type             string                     `json:"type"`
 			MinLength        int                        `json:"minLength"`
@@ -636,7 +698,7 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		{name: "required from", properties: schema.Definitions["requiredFrom"].Properties, want: []string{"path", "pathNot", "packageName"}},
 		{name: "to", properties: schema.Definitions["to"].Properties, want: []string{"path", "pathNot", "dependencyTypes", "dependencyTypesNot"}},
 		{name: "forbidden to", properties: schema.Definitions["forbiddenTo"].Properties, want: []string{"path", "pathNot", "reachable", "dependencyTypes", "dependencyTypesNot"}},
-		{name: "forbidden rule", properties: schema.Definitions["forbiddenRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
+		{name: "forbidden rule", properties: schema.Definitions["forbiddenRule"].Properties, want: []string{"name", "comment", "severity", "scope", "from", "to"}},
 		{name: "required rule", properties: schema.Definitions["requiredRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
 		{name: "allowed rule", properties: schema.Definitions["allowedRule"].Properties, want: []string{"name", "comment", "from", "to"}},
 	}
@@ -669,6 +731,11 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 			got:  schema.Definitions["dependencyType"].Enum,
 			want: []string{"stdlib", "local", "module", "unresolved"},
 		},
+		{
+			name: "scope",
+			got:  schema.Definitions["scope"].Enum,
+			want: []string{"module", "folder"},
+		},
 	}
 	for _, test := range enumTests {
 		t.Run(test.name+" enum", func(t *testing.T) {
@@ -693,6 +760,67 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		if nameProperty.Reference != "#/$defs/ruleName" {
 			t.Errorf("%s name reference = %q, want #/$defs/ruleName", definition, nameProperty.Reference)
 		}
+	}
+
+	var scopeProperty struct {
+		Reference string `json:"$ref"`
+		Default   string `json:"default"`
+	}
+	if err := json.Unmarshal(schema.Definitions["forbiddenRule"].Properties["scope"], &scopeProperty); err != nil {
+		t.Fatalf("decode forbiddenRule scope property: %v", err)
+	}
+	if scopeProperty.Reference != "#/$defs/scope" || scopeProperty.Default != "module" {
+		t.Errorf("forbiddenRule scope schema = %#v, want #/$defs/scope defaulting to module", scopeProperty)
+	}
+
+	if len(schema.Definitions["forbiddenRule"].AllOf) != 1 {
+		t.Fatalf("forbiddenRule allOf count = %d, want 1", len(schema.Definitions["forbiddenRule"].AllOf))
+	}
+	var folderScopeCondition struct {
+		If struct {
+			Properties map[string]struct {
+				Const string `json:"const"`
+			} `json:"properties"`
+			Required []string `json:"required"`
+		} `json:"if"`
+		Then struct {
+			Properties map[string]struct {
+				Not struct {
+					AnyOf []struct {
+						Required []string `json:"required"`
+					} `json:"anyOf"`
+				} `json:"not"`
+			} `json:"properties"`
+		} `json:"then"`
+	}
+	if err := json.Unmarshal(schema.Definitions["forbiddenRule"].AllOf[0], &folderScopeCondition); err != nil {
+		t.Fatalf("decode forbiddenRule folder scope condition: %v", err)
+	}
+	if folderScopeCondition.If.Properties["scope"].Const != "folder" ||
+		strings.Join(folderScopeCondition.If.Required, ",") != "scope" {
+		t.Errorf("forbiddenRule folder condition = %#v, want explicit scope folder", folderScopeCondition.If)
+	}
+	folderConflicts := func(property string) map[string]bool {
+		result := make(map[string]bool)
+		for _, condition := range folderScopeCondition.Then.Properties[property].Not.AnyOf {
+			if len(condition.Required) == 1 {
+				result[condition.Required[0]] = true
+			}
+		}
+
+		return result
+	}
+	fromConflicts := folderConflicts("from")
+	if len(fromConflicts) != 2 || !fromConflicts["orphan"] || !fromConflicts["packageName"] {
+		t.Errorf("folder from conflicts = %v, want orphan and packageName", fromConflicts)
+	}
+	toConflicts := folderConflicts("to")
+	if len(toConflicts) != 3 || !toConflicts["reachable"] ||
+		!toConflicts["dependencyTypes"] || !toConflicts["dependencyTypesNot"] {
+		t.Errorf(
+			"folder to conflicts = %v, want reachable, dependencyTypes, and dependencyTypesNot",
+			toConflicts,
+		)
 	}
 	dependentCountTests := []struct {
 		name    string

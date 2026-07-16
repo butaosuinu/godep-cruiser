@@ -15,10 +15,53 @@ import (
 	"github.com/butaosuinu/godep-cruiser/internal/scanner"
 )
 
-func TestBaselineExpiryCorpus(t *testing.T) {
+func TestBaselineCorpus(t *testing.T) {
 	t.Parallel()
 
-	moduleDir := filepath.Join("..", "..", "testdata", "corpus", "baseline-expiry")
+	tests := []struct {
+		name          string
+		fixtureID     string
+		configuration config.Config
+	}{
+		{
+			name:      "module-scoped edge",
+			fixtureID: "baseline-expiry",
+			configuration: config.Config{Forbidden: []config.ForbiddenRule{{
+				Name:     "core-no-adapters",
+				Severity: config.SeverityWarn,
+				From:     config.From{Path: []string{`^internal/core/`}},
+				To: config.To{
+					Path:            []string{`^internal/adapters/`},
+					DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
+				},
+			}}},
+		},
+		{
+			name:      "folder-scoped package edge",
+			fixtureID: "folder-scope",
+			configuration: config.Config{Forbidden: []config.ForbiddenRule{{
+				Name:     "app-no-blocked",
+				Severity: config.SeverityWarn,
+				Scope:    config.ScopeFolder,
+				From:     config.From{Path: []string{`^internal/app$`}},
+				To:       config.To{Path: []string{`^internal/blocked/`}},
+			}}},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			testBaselineCorpus(t, test.fixtureID, test.configuration)
+		})
+	}
+}
+
+func testBaselineCorpus(t *testing.T, fixtureID string, configuration config.Config) {
+	t.Helper()
+
+	moduleDir := filepath.Join("..", "..", "testdata", "corpus", fixtureID)
 	resolver, err := scanner.NewResolverFromGoMod(filepath.Join(moduleDir, "go.mod"))
 	if err != nil {
 		t.Fatalf("scanner.NewResolverFromGoMod() error = %v", err)
@@ -27,15 +70,6 @@ func TestBaselineExpiryCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scanner.Scan() error = %v", err)
 	}
-	configuration := config.Config{Forbidden: []config.ForbiddenRule{{
-		Name:     "core-no-adapters",
-		Severity: config.SeverityWarn,
-		From:     config.From{Path: []string{`^internal/core/`}},
-		To: config.To{
-			Path:            []string{`^internal/adapters/`},
-			DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
-		},
-	}}}
 	violations, err := engine.Evaluate(&configuration, files)
 	if err != nil {
 		t.Fatalf("engine.Evaluate() error = %v", err)
@@ -112,6 +146,9 @@ func projectViolation(violation engine.Violation) corpusFinding {
 	}
 	if violation.To != nil {
 		finding.To = violation.To.ImportPath
+		if finding.To == "" {
+			finding.To = violation.To.Path
+		}
 	}
 
 	return finding

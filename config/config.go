@@ -14,6 +14,15 @@ const (
 	SeverityIgnore Severity = "ignore"
 )
 
+// Scope controls the graph coordinate at which a forbidden rule is evaluated.
+type Scope string
+
+// Supported forbidden-rule scopes.
+const (
+	ScopeModule Scope = "module"
+	ScopeFolder Scope = "folder"
+)
+
 // DependencyType classifies a Go import dependency.
 type DependencyType string
 
@@ -64,6 +73,7 @@ type ForbiddenRule struct {
 	Name     string   `json:"name"`
 	Comment  string   `json:"comment,omitempty"`
 	Severity Severity `json:"severity,omitempty"`
+	Scope    Scope    `json:"scope,omitempty"`
 	From     From     `json:"from"`
 	To       To       `json:"to"`
 }
@@ -87,9 +97,11 @@ type AllowedRule struct {
 	To      To     `json:"to"`
 }
 
-// From contains conditions matched against the importing Go source file.
-// Pattern slices use OR semantics within a field and AND semantics across
-// fields. Pointer fields distinguish omitted conditions from false or zero.
+// From contains conditions matched against the importing Go source file or,
+// for a folder-scoped forbidden rule, the source package. Path patterns use
+// module-relative package paths for folder scope. Pattern slices use OR
+// semantics within a field and AND semantics across fields. Pointer fields
+// distinguish omitted conditions from false or zero.
 type From struct {
 	Path                       []string `json:"path,omitempty"`
 	PathNot                    []string `json:"pathNot,omitempty"`
@@ -99,9 +111,10 @@ type From struct {
 	NumberOfDependentsMoreThan *int     `json:"numberOfDependentsMoreThan,omitempty"`
 }
 
-// To contains conditions matched against an imported dependency or, for a
-// reachable forbidden rule, a package in the local dependency graph. Pattern
-// and dependency-type slices use OR semantics within a field and AND semantics
+// To contains conditions matched against an imported dependency or a package
+// in the local dependency graph for reachable and folder-scoped forbidden
+// rules. Folder scope uses module-relative package paths. Pattern and
+// dependency-type slices use OR semantics within a field and AND semantics
 // across fields. Reachable is a pointer so an omitted condition differs from
 // false.
 type To struct {

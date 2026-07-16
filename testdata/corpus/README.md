@@ -19,10 +19,11 @@ without relying on the directory name.
 Each expected violation contains:
 
 - `rule` and `severity` (`error`, `warn`, `info`, or `ignore`)
-- `from.path`, relative to the fixture module with `/` separators
+- `from.path`, relative to the fixture module with `/` separators; folder-scope
+  violations use a module-relative package path instead of a Go file path
 - `from.line`, the direct import line for ordinary edge violations, the
   initiating local import line for reachable violations, or the package line
-  for source-only violations
+  for source-only violations; folder-scope violations use line `0`
 - optional `to.path` and `to.dependencyType`; `package-main-placement`,
   `no-orphans`, `handler-requires-logging`, `minimum-two-dependents`,
   `maximum-two-dependents`, and `entrypoint-reaches-production` violations are
@@ -35,9 +36,12 @@ source import path. In particular, scanner keeps the cgo pseudo-import as raw
 path `C`, empty resolved path, and type `unresolved`; the golden target is
 therefore `C`. Reachable violations are the exception: their target is the
 module-relative package reached through the local graph rather than the import
-named on `from.line`. Violation arrays are sorted by rule, severity, from path,
-line, to path, and dependency type. The loader rejects unknown fields,
-duplicate JSON object keys, invalid enum values, stale source locations, and
+named on `from.line`. Folder-scope violations also use module-relative package
+paths for both endpoints, always use dependency type `local`, and represent a
+deduplicated package edge rather than an individual import declaration.
+Violation arrays are sorted by rule, severity, from path, line, to path, and
+dependency type. The loader rejects unknown fields, duplicate JSON object
+keys, invalid enum values, stale source locations or package edges, and
 repeated violation identities even when their severities differ.
 
 Optional `positiveControls` pin source facts that must stay in a fixture but
@@ -55,14 +59,15 @@ outside `cmd/` and `tools/` from the parsed fixture. It rejects any such
 source-only violation that is not listed in the golden, so adding another bad
 file cannot silently weaken these cases.
 
-The `baseline-expiry` module also pins baseline matching and expiry with two
-additional artifacts. `baseline.json` is an input containing exact raw import
-keys. `baseline.golden.json` projects the expected three states: `violations`
-for unmatched live violations, `known` for matched live violations, and
-`stale` for baseline entries whose violation disappeared. Stale entries add
-the exact diagnostic telling the user which entry to remove. These artifacts
-remain separate from `violations.golden.json`, whose import target is the
-resolver-normalized path used by the engine corpus.
+The `baseline-expiry` and `folder-scope` modules also pin baseline matching and
+expiry with two additional artifacts. `baseline.json` is an input containing
+exact identities. Module-scoped edges use raw import paths, while folder-scoped
+edges use module-relative target package paths. `baseline.golden.json` projects
+the expected three states: `violations` for unmatched live violations, `known`
+for matched live violations, and `stale` for baseline entries whose violation
+disappeared. Stale entries add the exact diagnostic telling the user which
+entry to remove. These artifacts remain separate from
+`violations.golden.json`, whose target is the engine corpus projection.
 
 The corpus deliberately does not include rule configuration files. Issue #3
 owns that format. Engine tests can construct rules through the eventual Go API,
@@ -74,6 +79,7 @@ and compare them with the golden list.
 | Directory | Case pinned by the module |
 |---|---|
 | `baseline-expiry` | A raw-path baseline match preserves the live violation's configured severity while a removed import becomes a stale error with an exact deletion diagnostic. |
+| `folder-scope` | Duplicate file imports collapse to one violation per forbidden local package edge, and package-path baseline identities cover unmatched, known, and stale states. |
 | `layer-direction` | Core may import core and a pinned migration file may import infra, but another core-to-infra edge is rejected. |
 | `number-of-dependents` | Files in the leaf package are reported below two direct dependent packages, while importer file splitting and a same-directory external test import do not inflate the hub count. |
 | `stdlib-denylist-exception` | Exact stdlib bans honor a package/import exception without exempting sibling imports. |
@@ -91,7 +97,8 @@ The first eight semantic cases are owned by issue #4; `baseline-expiry` is the
 ninth case and is owned by issue #6; `required-dependency` is the tenth and is
 owned by issue #24; `number-of-dependents` is the eleventh and is owned by
 issue #28; the reachable and unreachable cases are the twelfth and thirteenth
-and are owned by issue #27. They are inspired by
+and are owned by issue #27; `folder-scope` is the fourteenth and is owned by
+issue #39. They are inspired by
 fanout's architecture checks but are not a one-to-one copy of its test
 functions; filesystem tree-shape checks remain outside the import graph's
 scope.

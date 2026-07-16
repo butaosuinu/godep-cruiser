@@ -119,6 +119,48 @@ func TestDirectViewsAndCounts(t *testing.T) {
 	}
 }
 
+func TestDependencies(t *testing.T) {
+	t.Parallel()
+
+	dependencyGraph := graph.Build(graphFiles())
+	tests := []struct {
+		name        string
+		packagePath string
+		want        []string
+	}{
+		{
+			name:        "direct local edges are deduplicated and sorted",
+			packagePath: "internal/a",
+			want:        []string{"internal/b", "internal/c", "internal/missing"},
+		},
+		{
+			name:        "package identity is cleaned",
+			packagePath: "internal/a/.",
+			want:        []string{"internal/b", "internal/c", "internal/missing"},
+		},
+		{
+			name:        "same directory import is excluded",
+			packagePath: "internal/self",
+		},
+		{
+			name:        "unknown package has no dependencies",
+			packagePath: "internal/unknown",
+		},
+		{
+			name: "empty identity does not alias module root",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := dependencyGraph.Dependencies(test.packagePath); !slices.Equal(got, test.want) {
+				t.Errorf("Dependencies(%q) = %q, want %q", test.packagePath, got, test.want)
+			}
+		})
+	}
+}
+
 func TestBuildUsesModuleRelativePackageIdentity(t *testing.T) {
 	t.Parallel()
 

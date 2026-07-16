@@ -42,7 +42,7 @@ func TestViolationCorpus(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Evaluate() error = %v", err)
 			}
-			assertReachabilityCorpusKinds(t, fixture.ID, violations)
+			assertCorpusViolationShapes(t, fixture.ID, violations)
 
 			got := projectCorpusViolations(violations)
 			if !reflect.DeepEqual(got, fixture.Violations) {
@@ -69,6 +69,15 @@ func corpusConfigurations() map[string]config.Config {
 					Path:            []string{`^internal/adapters/`},
 					DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
 				},
+			}},
+		},
+		"folder-scope": {
+			Forbidden: []config.ForbiddenRule{{
+				Name:     "app-no-blocked",
+				Severity: config.SeverityWarn,
+				Scope:    config.ScopeFolder,
+				From:     config.From{Path: []string{`^internal/app$`}},
+				To:       config.To{Path: []string{`^internal/blocked/`}},
 			}},
 		},
 		"forbidden-import-target": {
@@ -219,7 +228,7 @@ func corpusConfigurations() map[string]config.Config {
 	}
 }
 
-func assertReachabilityCorpusKinds(t *testing.T, fixtureID string, violations []Violation) {
+func assertCorpusViolationShapes(t *testing.T, fixtureID string, violations []Violation) {
 	t.Helper()
 
 	switch fixtureID {
@@ -243,6 +252,25 @@ func assertReachabilityCorpusKinds(t *testing.T, fixtureID string, violations []
 			}
 			if violation.To != nil {
 				t.Errorf("unreachable corpus violation To = %#v, want nil", violation.To)
+			}
+		}
+	case "folder-scope":
+		for _, violation := range violations {
+			if violation.Kind != ViolationKindForbidden {
+				t.Errorf("folder-scope corpus violation kind = %q, want %q", violation.Kind, ViolationKindForbidden)
+			}
+			if violation.From.Path != "internal/app" || violation.From.Line != 0 || violation.From.PackageName != "" {
+				t.Errorf("folder-scope corpus From = %#v, want package path with line zero and empty package name", violation.From)
+			}
+			if violation.To == nil {
+				t.Error("folder-scope corpus violation To = nil, want package target")
+				continue
+			}
+			if violation.To.ImportPath != "" {
+				t.Errorf("folder-scope corpus violation ImportPath = %q, want empty", violation.To.ImportPath)
+			}
+			if violation.To.Type != scanner.DependencyTypeLocal {
+				t.Errorf("folder-scope corpus violation dependency type = %q, want %q", violation.To.Type, scanner.DependencyTypeLocal)
 			}
 		}
 	}
