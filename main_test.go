@@ -30,6 +30,7 @@ func TestCLIReportersEndToEnd(t *testing.T) {
 		{name: "json", outputType: "json", golden: "layer-direction.json.golden"},
 		{name: "mermaid", outputType: "mermaid", golden: "layer-direction.mermaid.golden"},
 		{name: "dot", outputType: "dot", golden: "layer-direction.dot.golden"},
+		{name: "html", outputType: "html", golden: "layer-direction.html.golden"},
 	}
 
 	for _, test := range tests {
@@ -158,6 +159,19 @@ func TestCLIBaselineEndToEnd(t *testing.T) {
 			validated.stderr,
 		)
 	}
+
+	html := executeCLI(t,
+		"--config", configuration,
+		"--scan-root", root,
+		"--baseline", baselinePath,
+		"--output-type", "html",
+	)
+	if html.exitCode != 0 || html.stderr != "" {
+		t.Fatalf("HTML baseline validation = (exit %d, stderr %q), want (0, empty)", html.exitCode, html.stderr)
+	}
+	if want := readGolden(t, "layer-direction-known.html.golden"); html.stdout != want {
+		t.Errorf("HTML baseline validation stdout =\n%s\nwant golden =\n%s", html.stdout, want)
+	}
 }
 
 func TestCLIStaleBaselineEndToEnd(t *testing.T) {
@@ -176,6 +190,38 @@ func TestCLIStaleBaselineEndToEnd(t *testing.T) {
 	}
 	if want := readGolden(t, "baseline-expiry.err.golden"); result.stdout != want {
 		t.Errorf("stdout =\n%s\nwant golden =\n%s", result.stdout, want)
+	}
+
+	html := executeCLI(t,
+		"--config", repositoryPath(t, "testdata", "cli", "baseline-expiry.json"),
+		"--scan-root", repositoryPath(t, "testdata", "corpus", "baseline-expiry"),
+		"--baseline", repositoryPath(t, "testdata", "corpus", "baseline-expiry", "baseline.json"),
+		"--output-type", "html",
+	)
+	if html.exitCode != 1 || html.stderr != "" {
+		t.Fatalf("HTML stale validation = (exit %d, stderr %q), want (1, empty)", html.exitCode, html.stderr)
+	}
+	if want := readGolden(t, "baseline-expiry.html.golden"); html.stdout != want {
+		t.Errorf("HTML stale validation stdout =\n%s\nwant golden =\n%s", html.stdout, want)
+	}
+	if strings.Contains(html.stdout, "internal/adapters/live") {
+		t.Errorf("HTML stale validation includes baseline-known violation:\n%s", html.stdout)
+	}
+}
+
+func TestCLIHTMLSourceOnlyEndToEnd(t *testing.T) {
+	t.Parallel()
+
+	result := executeCLI(t,
+		"--config", repositoryPath(t, "testdata", "cli", "required-dependency.json"),
+		"--scan-root", repositoryPath(t, "testdata", "corpus", "required-dependency"),
+		"--output-type", "html",
+	)
+	if result.exitCode != 1 || result.stderr != "" {
+		t.Fatalf("HTML source-only validation = (exit %d, stderr %q), want (1, empty)", result.exitCode, result.stderr)
+	}
+	if want := readGolden(t, "required-dependency.html.golden"); result.stdout != want {
+		t.Errorf("HTML source-only validation stdout =\n%s\nwant golden =\n%s", result.stdout, want)
 	}
 }
 

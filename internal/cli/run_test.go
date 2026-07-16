@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/butaosuinu/godep-cruiser/cruiser"
 )
 
 func TestRunVersionWriteFailure(t *testing.T) {
@@ -18,6 +20,22 @@ func TestRunVersionWriteFailure(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), wantErr.Error()) {
 		t.Errorf("Run() stderr = %q, want it to contain %q", stderr.String(), wantErr)
+	}
+}
+
+func TestRunHelpListsHTML(t *testing.T) {
+	t.Parallel()
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"--help"}, &stdout, &stderr, "dev")
+	if code != 0 {
+		t.Errorf("Run(--help) exit code = %d, want 0", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("Run(--help) stdout = %q, want empty", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "err, json, mermaid, dot, or html") {
+		t.Errorf("Run(--help) stderr does not list HTML output: %q", stderr.String())
 	}
 }
 
@@ -42,6 +60,35 @@ func TestValidationExitCode(t *testing.T) {
 
 			if got := validationExitCode(test.errorCount); got != test.want {
 				t.Errorf("validationExitCode(%d) = %d, want %d", test.errorCount, got, test.want)
+			}
+		})
+	}
+}
+
+func TestOutputType(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  cruiser.OutputType
+		ok    bool
+	}{
+		{name: "err", value: "err", want: cruiser.OutputTypeErr, ok: true},
+		{name: "json", value: "json", want: cruiser.OutputTypeJSON, ok: true},
+		{name: "mermaid", value: "mermaid", want: cruiser.OutputTypeMermaid, ok: true},
+		{name: "dot", value: "dot", want: cruiser.OutputTypeDOT, ok: true},
+		{name: "html", value: "html", want: cruiser.OutputTypeHTML, ok: true},
+		{name: "unsupported", value: "yaml"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, ok := outputType(test.value)
+			if got != test.want || ok != test.ok {
+				t.Errorf("outputType(%q) = (%q, %t), want (%q, %t)", test.value, got, ok, test.want, test.ok)
 			}
 		})
 	}

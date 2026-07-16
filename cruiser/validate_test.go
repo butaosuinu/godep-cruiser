@@ -358,9 +358,15 @@ func TestWriteReportRejectsUnknownType(t *testing.T) {
 func TestWriteReportIncludesStaleBaselineEntries(t *testing.T) {
 	t.Parallel()
 
-	result := cruiser.Result{Stale: []cruiser.StaleError{{
-		Entry: cruiser.BaselineEntry{Rule: "removed", From: "old.go"},
-	}}}
+	result := cruiser.Result{
+		Known: []cruiser.Violation{{
+			Rule: "known-only",
+			From: cruiser.Source{Path: "known.go"},
+		}},
+		Stale: []cruiser.StaleError{{
+			Entry: cruiser.BaselineEntry{Rule: "removed", From: "old.go"},
+		}},
+	}
 	tests := []struct {
 		name       string
 		outputType cruiser.OutputType
@@ -388,6 +394,12 @@ func TestWriteReportIncludesStaleBaselineEntries(t *testing.T) {
 			outputType: cruiser.OutputTypeDOT,
 			want:       []string{"digraph violations", "stale0", "baseline entry is stale"},
 			wantAbsent: "No violations",
+		},
+		{
+			name:       "html",
+			outputType: cruiser.OutputTypeHTML,
+			want:       []string{"Stale baseline entries", "<dt>Total</dt><dd>1</dd>", "remove this entry from the baseline"},
+			wantAbsent: "known-only",
 		},
 	}
 

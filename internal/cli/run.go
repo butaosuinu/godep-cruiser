@@ -17,7 +17,7 @@ Validate dependency rules by default. Options:
   --config FILE          JSON rule configuration (required)
   --scan-root DIR        Go source root (default ".")
   --baseline FILE        exact-match violation baseline
-  --output-type TYPE     err, json, mermaid, or dot (default "err")
+  --output-type TYPE     err, json, mermaid, dot, or html (default "err")
   --generate-baseline    write a baseline to stdout and exit 0
   --version              print the version
 `
@@ -53,7 +53,7 @@ func Run(args []string, stdout, stderr io.Writer, version string) int {
 	flags.StringVar(&configPath, "config", "", "JSON rule configuration")
 	flags.StringVar(&scanRoot, "scan-root", ".", "Go source root")
 	flags.StringVar(&baselinePath, "baseline", "", "exact-match violation baseline")
-	flags.StringVar(&outputValue, "output-type", string(cruiser.OutputTypeErr), "err, json, mermaid, or dot")
+	flags.StringVar(&outputValue, "output-type", string(cruiser.OutputTypeErr), "err, json, mermaid, dot, or html")
 	flags.BoolVar(&generate, "generate-baseline", false, "write a baseline to stdout")
 	flags.BoolVar(&versionFlag, "version", false, "print the version")
 
@@ -126,7 +126,7 @@ func validationExitCode(errorCount int) int {
 
 func outputType(value string) (cruiser.OutputType, bool) {
 	switch cruiser.OutputType(value) {
-	case cruiser.OutputTypeErr, cruiser.OutputTypeJSON, cruiser.OutputTypeMermaid, cruiser.OutputTypeDOT:
+	case cruiser.OutputTypeErr, cruiser.OutputTypeJSON, cruiser.OutputTypeMermaid, cruiser.OutputTypeDOT, cruiser.OutputTypeHTML:
 		return cruiser.OutputType(value), true
 	default:
 		return "", false
