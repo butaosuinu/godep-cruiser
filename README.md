@@ -5,8 +5,9 @@ Validate dependency rules for Go source trees.
 godep-cruiser is a clean-room Go reimplementation of the concepts in
 [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) by
 Sander Verweij — forbidden/allowed/required rules with regex `path` / `pathNot`
-matching, transitive reachability checks, dependency-type classification
-(stdlib / in-module / third-party / unresolved), and a violation baseline.
+matching, transitive reachability and package fan-in checks, dependency-type
+classification (stdlib / in-module / third-party / unresolved), and a violation
+baseline.
 It adds one thing the original does not have: stale baseline entries fail
 the run, so grandfathered exceptions expire automatically when the
 violation they cover disappears.
@@ -37,6 +38,18 @@ explicitly:
 godep-cruiser --config godep-cruiser.json --scan-root . --output-type json
 godep-cruiser --config godep-cruiser.json --scan-root . --output-type mermaid
 ```
+
+In JSON reports, `violations[].kind` is one of:
+
+- `forbidden` for an ordinary forbidden-rule match, including source-only
+  orphan, package-name, and dependent-count checks
+- `not-in-allowed` for a dependency that matches no allowed rule
+- `required` for a source file missing a required import
+- `reachable` for a matching package that is transitively reachable
+- `unreachable` for a matching package outside the entry-point closure
+
+Source-only violations serialize `to` as `null`; edge violations include the
+target dependency or package.
 
 Generate and then apply an exact-match baseline:
 
@@ -84,6 +97,27 @@ capture references, unknown fields, and source positions.
         "pathNot": ["^internal/features/$1/"],
         "dependencyTypes": ["local"]
       }
+    },
+    {
+      "name": "entrypoints-reach-production",
+      "severity": "error",
+      "from": {
+        "path": ["^cmd/"]
+      },
+      "to": {
+        "path": ["^internal/"],
+        "pathNot": ["^internal/testutil(/|$)"],
+        "reachable": false
+      }
+    },
+    {
+      "name": "shared-packages-have-multiple-dependents",
+      "severity": "warn",
+      "from": {
+        "path": ["^internal/shared/"],
+        "numberOfDependentsLessThan": 2
+      },
+      "to": {}
     }
   ],
   "required": [
@@ -130,6 +164,12 @@ every file in a matching target package outside their transitive closure. Both
 forms require `to.path`, allow `to.pathNot`, and reject dependency-type fields.
 Capture references remain available for `true` but are invalid for `false`;
 allowed and required rules do not accept `reachable`.
+
+`from.numberOfDependentsLessThan` and
+`from.numberOfDependentsMoreThan` compare the source package's distinct direct
+local dependents with strict `<` and `>` bounds. In a forbidden rule, combining
+either condition with `to: {}` reports one source-only violation per matching
+file. Required rules do not accept dependent-count conditions.
 
 ## Library API
 
@@ -183,8 +223,8 @@ For an ordinary import edge, the key is `rule` + `from` + `to`, where `to` is
 the raw import path written in the Go source rather than a resolved path. A
 `reachable: true` violation has no single raw target import, so its `to` key is
 the module-relative target package path. Source-only violations such as orphan,
-package-name, required, and `reachable: false` rules omit `to` and match on the
-pair `rule` and `from`.
+package-name, dependent-count, required, and `reachable: false` rules omit `to`
+and match on the pair `rule` and `from`.
 
 The baseline has three outcomes:
 
