@@ -40,7 +40,7 @@ Go ツール」というニッチは空いている。
 4. grandfathered 違反を baseline に記録して新規違反だけを検出できる。
    **baseline エントリに対応する違反が消えたら、それ自体をエラーにする**(自動失効)
 5. 違反メッセージは修正方法まで示す(「どのルールに、どの edge が、なぜ」)
-6. exit code = error 違反数(255 を上限とする)。CI にそのまま置ける
+6. exit code = 未抑止の error 違反数 + stale baseline entry 数(255 を上限とする)。CI にそのまま置ける
 
 ### 参照ケース: fanout の 8 テスト
 
@@ -235,7 +235,7 @@ stdlib、third-party、unresolved は edge に含めない。
 
 同一ディレクトリの external test package から通常 package への import は self-edge になるため、依存グラフと逆インデックスから除外する。
 これにより、direct な fan-in と fan-out は異なる package 間の edge 数になり、ファイル分割の影響を受けない。
-ただし v0.1 の orphan 判定は同一ディレクトリの import も被 import として扱うため、全 local import の target を保持する imported view を依存グラフと分離する。
+ただし orphan 判定は同一ディレクトリの import も被 import として扱うため、全 local import の target を保持する imported view を依存グラフと分離する。
 
 forward と reverse の到達閉包は、既知の seed package を含む multi-source BFS として計算する。
 engine はファイルごとの orphan と package 単位の direct dependent 数を `fileFacts` に集約し、from matcher に渡す。
