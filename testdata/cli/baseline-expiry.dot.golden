@@ -1,0 +1,5 @@
+digraph violations {
+  rankdir=LR;
+  node [shape=box];
+  stale0 [label="[error] baseline entry is stale: rule \"core-no-adapters\", from \"internal/core/core.go\", to \"example.test/baseline-expiry/internal/adapters/removed\"; remove this entry from the baseline.", color="#cf222e", fillcolor="#ffebe9", penwidth=2, style="filled"];
+}

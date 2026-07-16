@@ -1,0 +1,7 @@
+digraph violations {
+  rankdir=LR;
+  node [shape=box];
+  n0 [label="internal/core/core.go"];
+  n1 [label="internal/infra (local)"];
+  n0 -> n1 [label="line 5: layer-direction [error]", color="#cf222e", penwidth=3];
+}

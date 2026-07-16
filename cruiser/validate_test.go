@@ -383,6 +383,12 @@ func TestWriteReportIncludesStaleBaselineEntries(t *testing.T) {
 			want:       []string{"stale0", "staleBaselineError"},
 			wantAbsent: "No violations",
 		},
+		{
+			name:       "dot",
+			outputType: cruiser.OutputTypeDOT,
+			want:       []string{"digraph violations", "stale0", "baseline entry is stale"},
+			wantAbsent: "No violations",
+		},
 	}
 
 	for _, test := range tests {

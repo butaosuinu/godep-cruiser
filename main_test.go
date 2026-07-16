@@ -29,6 +29,7 @@ func TestCLIReportersEndToEnd(t *testing.T) {
 		{name: "err", outputType: "err", golden: "layer-direction.err.golden"},
 		{name: "json", outputType: "json", golden: "layer-direction.json.golden"},
 		{name: "mermaid", outputType: "mermaid", golden: "layer-direction.mermaid.golden"},
+		{name: "dot", outputType: "dot", golden: "layer-direction.dot.golden"},
 	}
 
 	for _, test := range tests {
@@ -42,6 +43,75 @@ func TestCLIReportersEndToEnd(t *testing.T) {
 			)
 			if result.exitCode != 1 {
 				t.Errorf("exit code = %d, want 1; stderr = %q", result.exitCode, result.stderr)
+			}
+			if result.stderr != "" {
+				t.Errorf("stderr = %q, want empty", result.stderr)
+			}
+			want := readGolden(t, test.golden)
+			if result.stdout != want {
+				t.Errorf("stdout =\n%s\nwant golden =\n%s", result.stdout, want)
+			}
+		})
+	}
+}
+
+func TestCLIDOTReportShapesEndToEnd(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name         string
+		args         []string
+		golden       string
+		wantExitCode int
+	}{
+		{
+			name: "empty report",
+			args: []string{
+				"--config", repositoryPath(t, "testdata", "cli", "quick-start.json"),
+				"--scan-root", repositoryPath(t),
+			},
+			golden: "quick-start.dot.golden",
+		},
+		{
+			name: "stale baseline entry",
+			args: []string{
+				"--config", repositoryPath(t, "testdata", "cli", "baseline-expiry.json"),
+				"--scan-root", repositoryPath(t, "testdata", "corpus", "baseline-expiry"),
+				"--baseline", repositoryPath(
+					t,
+					"testdata",
+					"corpus",
+					"baseline-expiry",
+					"baseline.json",
+				),
+			},
+			golden:       "baseline-expiry.dot.golden",
+			wantExitCode: 1,
+		},
+		{
+			name: "source-only violation",
+			args: []string{
+				"--config", repositoryPath(t, "testdata", "cli", "orphan-file.json"),
+				"--scan-root", repositoryPath(t, "testdata", "corpus", "orphan-file"),
+			},
+			golden:       "orphan-file.dot.golden",
+			wantExitCode: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			args := append([]string{"--output-type", "dot"}, test.args...)
+			result := executeCLI(t, args...)
+			if result.exitCode != test.wantExitCode {
+				t.Errorf(
+					"exit code = %d, want %d; stderr = %q",
+					result.exitCode,
+					test.wantExitCode,
+					result.stderr,
+				)
 			}
 			if result.stderr != "" {
 				t.Errorf("stderr = %q, want empty", result.stderr)
