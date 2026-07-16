@@ -1,14 +1,14 @@
 package cruiser
 
 import (
-	"fmt"
-
 	"github.com/butaosuinu/godep-cruiser/config"
+	"github.com/butaosuinu/godep-cruiser/internal/baseline"
+	"github.com/butaosuinu/godep-cruiser/internal/engine"
 )
 
 // NotInAllowedRuleName is the rule name used for dependencies that match no
 // allowed rule.
-const NotInAllowedRuleName = "not-in-allowed"
+const NotInAllowedRuleName = engine.NotInAllowedRuleName
 
 // Options controls one validation run.
 type Options struct {
@@ -26,70 +26,32 @@ type Options struct {
 }
 
 // ViolationKind identifies why a rule produced a violation.
-type ViolationKind string
+type ViolationKind = engine.ViolationKind
 
 // Supported violation kinds.
 const (
-	ViolationKindForbidden   ViolationKind = "forbidden"
-	ViolationKindNotAllowed  ViolationKind = NotInAllowedRuleName
-	ViolationKindRequired    ViolationKind = "required"
-	ViolationKindReachable   ViolationKind = "reachable"
-	ViolationKindUnreachable ViolationKind = "unreachable"
+	ViolationKindForbidden   ViolationKind = engine.ViolationKindForbidden
+	ViolationKindNotAllowed  ViolationKind = engine.ViolationKindNotAllowed
+	ViolationKindRequired    ViolationKind = engine.ViolationKindRequired
+	ViolationKindReachable   ViolationKind = engine.ViolationKindReachable
+	ViolationKindUnreachable ViolationKind = engine.ViolationKindUnreachable
 )
 
 // Source identifies the importing file and source position of a violation.
-type Source struct {
-	Path        string
-	Line        int
-	PackageName string
-}
+type Source = engine.Source
 
-// Dependency identifies the imported target of an edge violation.
-type Dependency struct {
-	// Path is module-relative for local dependencies and otherwise the resolved
-	// dependency path. It falls back to ImportPath when resolution has no path.
-	Path string
-	// ImportPath is the path exactly as declared by the Go source file. It is
-	// empty for reachable violations, whose target is a synthesized package node.
-	ImportPath string
-	Type       config.DependencyType
-}
+// Dependency identifies the imported target of an edge violation. Path is the
+// normalized dependency path and ImportPath is the path declared by the source.
+type Dependency = engine.Dependency
 
 // Violation describes one unsuppressed or baseline-known rule violation. To is
 // nil for source-only rules such as orphan, package-name, dependent-count,
 // required, and unreachable checks.
-type Violation struct {
-	Rule     string
-	Comment  string
-	Severity config.Severity
-	Kind     ViolationKind
-	From     Source
-	To       *Dependency
-}
+type Violation = engine.Violation
 
 // StaleError reports a baseline entry that no longer matches a current
 // violation. Stale entries are always errors regardless of rule severity.
-type StaleError struct {
-	Entry BaselineEntry
-}
-
-// Error describes the stale identity and how to resolve it.
-func (err StaleError) Error() string {
-	if err.Entry.To == nil {
-		return fmt.Sprintf(
-			"baseline entry is stale: rule %q, from %q; remove this entry from the baseline.",
-			err.Entry.Rule,
-			err.Entry.From,
-		)
-	}
-
-	return fmt.Sprintf(
-		"baseline entry is stale: rule %q, from %q, to %q; remove this entry from the baseline.",
-		err.Entry.Rule,
-		err.Entry.From,
-		*err.Entry.To,
-	)
-}
+type StaleError = baseline.StaleError
 
 // Result contains the reportable, baseline-known, and stale outcomes of one
 // validation run. Known violations are suppressed from reports and exit codes.

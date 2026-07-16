@@ -45,19 +45,19 @@ func Validate(configuration *config.Config, options Options) (Result, error) {
 	}
 
 	if options.Baseline == nil {
-		return Result{Violations: fromEngineViolations(violations)}, nil
+		return Result{Violations: violations}, nil
 	}
 
-	known := toInternalBaseline(*options.Baseline)
+	known := *options.Baseline
 	if err := baseline.Write(io.Discard, known); err != nil {
 		return Result{}, fmt.Errorf("validate baseline: %w", err)
 	}
 	partitioned := baseline.Apply(known, violations)
 
 	return Result{
-		Violations: fromEngineViolations(partitioned.Violations),
-		Known:      fromEngineViolations(partitioned.Known),
-		Stale:      fromInternalStaleErrors(partitioned.Stale),
+		Violations: partitioned.Violations,
+		Known:      partitioned.Known,
+		Stale:      partitioned.Stale,
 	}, nil
 }
 

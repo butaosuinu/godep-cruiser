@@ -1,22 +1,26 @@
 package scanner
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/butaosuinu/godep-cruiser/config"
+)
 
 // ErrNoGoFiles reports a scan root from which no Go files were parsed.
 var ErrNoGoFiles = errors.New("scan root contains no Go files")
 
 // DependencyType is the mutually exclusive classification of an import.
-type DependencyType string
+type DependencyType = config.DependencyType
 
 const (
 	// DependencyTypeStdlib identifies an import whose first path segment has no dot.
-	DependencyTypeStdlib DependencyType = "stdlib"
+	DependencyTypeStdlib DependencyType = config.DependencyTypeStdlib
 	// DependencyTypeLocal identifies an import within the resolver's Go module.
-	DependencyTypeLocal DependencyType = "local"
+	DependencyTypeLocal DependencyType = config.DependencyTypeLocal
 	// DependencyTypeModule identifies an import from another Go module.
-	DependencyTypeModule DependencyType = "module"
+	DependencyTypeModule DependencyType = config.DependencyTypeModule
 	// DependencyTypeUnresolved identifies an import that cannot be resolved.
-	DependencyTypeUnresolved DependencyType = "unresolved"
+	DependencyTypeUnresolved DependencyType = config.DependencyTypeUnresolved
 )
 
 // Resolution describes how an import path is classified and normalized.
