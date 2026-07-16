@@ -41,9 +41,12 @@ const (
 // violations use a package path with line zero and an empty package name.
 type Source = engine.Source
 
-// Dependency identifies the imported target of an edge violation. ImportPath
-// is empty when the target is a synthesized package node, as with reachable and
-// folder-scoped violations.
+// Dependency identifies the imported target of an edge violation. Path is
+// module-relative for local dependencies and otherwise the resolved dependency
+// path; it falls back to ImportPath when resolution has no path. ImportPath is
+// the path exactly as declared by the Go source file and is empty when the
+// target is a synthesized package node, as with reachable and folder-scoped
+// violations.
 type Dependency = engine.Dependency
 
 // Violation describes one unsuppressed or baseline-known rule violation. To is

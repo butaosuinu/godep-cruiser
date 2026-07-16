@@ -189,9 +189,12 @@ allowed and required rules do not accept `reachable`.
 
 `from.numberOfDependentsLessThan` and
 `from.numberOfDependentsMoreThan` compare the source package's distinct direct
-local dependents with strict `<` and `>` bounds. In a forbidden rule, combining
-either condition with `to: {}` reports one source-only violation per matching
-file. Required rules do not accept dependent-count conditions.
+local dependents with strict `<` and `>` bounds. In a module-scoped forbidden
+rule, combining either condition with `to: {}` reports one source-only
+violation per matching file. In folder scope, `to: {}` matches every outgoing
+local package edge, so the condition filters source packages and an importless
+package produces no violation. Required rules do not accept dependent-count
+conditions.
 
 ## Library API
 
@@ -267,8 +270,9 @@ the raw import path written in the Go source rather than a resolved path. A
 `reachable: true` violation has no single raw target import, so its `to` key is
 the module-relative target package path. A folder-scoped package edge likewise
 uses module-relative package paths for both `from` and `to`. Source-only
-violations such as orphan, package-name, dependent-count, required, and
-`reachable: false` rules omit `to` and match on the pair `rule` and `from`.
+violations such as module-scoped orphan, package-name, and dependent-count
+checks, required rules, and `reachable: false` rules omit `to` and match on the
+pair `rule` and `from`.
 
 The baseline has three outcomes:
 
