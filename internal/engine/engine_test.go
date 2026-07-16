@@ -573,6 +573,149 @@ func TestCollectFileFactsUsesPackageDependents(t *testing.T) {
 	}
 }
 
+func TestNumberOfDependentsMatchesPackageFanIn(t *testing.T) {
+	t.Parallel()
+
+	localImport := func(target string, line int) scanner.Import {
+		return scanner.Import{
+			Path:         "example.com/project/" + target,
+			ResolvedPath: target,
+			Type:         scanner.DependencyTypeLocal,
+			Line:         line,
+		}
+	}
+	files := []scanner.File{
+		{
+			Path:        "app/one.go",
+			PackagePath: "internal/app",
+			Imports:     []scanner.Import{localImport("internal/hub", 3)},
+		},
+		{
+			Path:        "app/two.go",
+			PackagePath: "internal/app",
+			Imports:     []scanner.Import{localImport("internal/hub", 3)},
+		},
+		{
+			Path:        "other/main.go",
+			PackagePath: "internal/other",
+			Imports:     []scanner.Import{localImport("internal/hub", 3)},
+		},
+		{
+			Path:        "hub/hub.go",
+			PackagePath: "internal/hub",
+			Package:     "hub",
+			PackageLine: 7,
+			Imports:     []scanner.Import{localImport("internal/leaf", 11)},
+		},
+		{
+			Path:        "hub/hub_test.go",
+			PackagePath: "internal/hub",
+			Package:     "hub_test",
+			Imports:     []scanner.Import{localImport("internal/hub", 3)},
+		},
+		{Path: "leaf/leaf.go", PackagePath: "internal/leaf"},
+	}
+	lessThanTwo := 2
+	lessThanThree := 3
+	lessThanFour := 4
+	moreThanOne := 1
+	moreThanTwo := 2
+	leafEdge := config.To{
+		Path:            []string{`^internal/leaf$`},
+		DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
+	}
+	tests := []struct {
+		name           string
+		from           config.From
+		to             config.To
+		wantCount      int
+		wantSourceOnly bool
+		wantLine       int
+	}{
+		{
+			name:           "less than alone matches a larger strict bound",
+			from:           config.From{NumberOfDependentsLessThan: &lessThanThree},
+			wantCount:      1,
+			wantSourceOnly: true,
+			wantLine:       7,
+		},
+		{
+			name: "less than alone excludes its equality boundary",
+			from: config.From{NumberOfDependentsLessThan: &lessThanTwo},
+		},
+		{
+			name:           "more than alone matches a smaller strict bound",
+			from:           config.From{NumberOfDependentsMoreThan: &moreThanOne},
+			wantCount:      1,
+			wantSourceOnly: true,
+			wantLine:       7,
+		},
+		{
+			name: "same-directory external test import does not cross more than boundary",
+			from: config.From{NumberOfDependentsMoreThan: &moreThanTwo},
+		},
+		{
+			name: "open range matches between both bounds",
+			from: config.From{
+				NumberOfDependentsLessThan: &lessThanThree,
+				NumberOfDependentsMoreThan: &moreThanOne,
+			},
+			wantCount:      1,
+			wantSourceOnly: true,
+			wantLine:       7,
+		},
+		{
+			name: "open range excludes its lower equality boundary",
+			from: config.From{
+				NumberOfDependentsLessThan: &lessThanFour,
+				NumberOfDependentsMoreThan: &moreThanTwo,
+			},
+		},
+		{
+			name:      "edge condition combines with matching from count",
+			from:      config.From{NumberOfDependentsMoreThan: &moreThanOne},
+			to:        leafEdge,
+			wantCount: 1,
+			wantLine:  11,
+		},
+		{
+			name: "edge condition cannot bypass a nonmatching from count",
+			from: config.From{NumberOfDependentsMoreThan: &moreThanTwo},
+			to:   leafEdge,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			test.from.Path = []string{`^hub/hub\.go$`}
+			configuration := config.Config{Forbidden: []config.ForbiddenRule{{
+				Name:     "dependent-count",
+				Severity: config.SeverityError,
+				From:     test.from,
+				To:       test.to,
+			}}}
+			got, err := Evaluate(&configuration, files)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if len(got) != test.wantCount {
+				t.Fatalf("Evaluate() violation count = %d, want %d: %#v", len(got), test.wantCount, got)
+			}
+			if test.wantCount == 0 {
+				return
+			}
+			if (got[0].To == nil) != test.wantSourceOnly {
+				t.Errorf("Evaluate() To = %#v, sourceOnly want %t", got[0].To, test.wantSourceOnly)
+			}
+			if got[0].From.Line != test.wantLine {
+				t.Errorf("Evaluate() source line = %d, want %d", got[0].From.Line, test.wantLine)
+			}
+		})
+	}
+}
+
 func TestForbiddenDuplicationAndIgnore(t *testing.T) {
 	t.Parallel()
 

@@ -53,6 +53,8 @@ func TestViolationCorpus(t *testing.T) {
 
 func corpusConfigurations() map[string]config.Config {
 	orphan := true
+	lessThanTwo := 2
+	moreThanTwo := 2
 
 	return map[string]config.Config{
 		"baseline-expiry": {
@@ -90,6 +92,28 @@ func corpusConfigurations() map[string]config.Config {
 					DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
 				},
 			}},
+		},
+		"number-of-dependents": {
+			Forbidden: []config.ForbiddenRule{
+				{
+					Name:     "minimum-two-dependents",
+					Severity: config.SeverityError,
+					From: config.From{
+						Path:                       []string{`^internal/(?:hub|leaf)/`},
+						NumberOfDependentsLessThan: &lessThanTwo,
+					},
+					To: config.To{},
+				},
+				{
+					Name:     "maximum-two-dependents",
+					Severity: config.SeverityError,
+					From: config.From{
+						Path:                       []string{`^internal/hub/`},
+						NumberOfDependentsMoreThan: &moreThanTwo,
+					},
+					To: config.To{},
+				},
+			},
 		},
 		"orphan-file": {
 			Forbidden: []config.ForbiddenRule{{

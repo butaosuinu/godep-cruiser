@@ -23,8 +23,9 @@ Each expected violation contains:
 - `from.line`, the import line for edge violations or package line for
   source-only violations
 - optional `to.path` and `to.dependencyType`; `package-main-placement`,
-  `no-orphans`, and `handler-requires-logging` violations are source-only and
-  must omit `to`, while every other corpus violation must include it
+  `no-orphans`, `handler-requires-logging`, `minimum-two-dependents`, and
+  `maximum-two-dependents` violations are source-only and must omit `to`,
+  while every other corpus violation must include it
 
 Dependency classification is delegated to `internal/scanner`. `to.path` uses
 the resolver's normalized path when it is non-empty and otherwise retains the
@@ -69,6 +70,7 @@ and compare them with the golden list.
 |---|---|
 | `baseline-expiry` | A raw-path baseline match preserves the live violation's configured severity while a removed import becomes a stale error with an exact deletion diagnostic. |
 | `layer-direction` | Core may import core and a pinned migration file may import infra, but another core-to-infra edge is rejected. |
+| `number-of-dependents` | Files in the leaf package are reported below two direct dependent packages, while importer file splitting and a same-directory external test import do not inflate the hub count. |
 | `stdlib-denylist-exception` | Exact stdlib bans honor a package/import exception without exempting sibling imports. |
 | `third-party-in-core` | Core rejects a third-party module dependency. |
 | `stdlib-only-tree` | A tools tree may use stdlib but rejects a local dependency. |
@@ -80,7 +82,8 @@ and compare them with the golden list.
 
 The first eight semantic cases are owned by issue #4; `baseline-expiry` is the
 ninth case and is owned by issue #6; `required-dependency` is the tenth and is
-owned by issue #24. They are inspired by
+owned by issue #24; `number-of-dependents` is the eleventh and is owned by
+issue #28. They are inspired by
 fanout's architecture checks but are not a one-to-one copy of its test
 functions; filesystem tree-shape checks remain outside the import graph's
 scope.

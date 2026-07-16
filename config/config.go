@@ -89,12 +89,14 @@ type AllowedRule struct {
 
 // From contains conditions matched against the importing Go source file.
 // Pattern slices use OR semantics within a field and AND semantics across
-// fields. Orphan is a pointer so an omitted condition differs from false.
+// fields. Pointer fields distinguish omitted conditions from false or zero.
 type From struct {
-	Path        []string `json:"path,omitempty"`
-	PathNot     []string `json:"pathNot,omitempty"`
-	Orphan      *bool    `json:"orphan,omitempty"`
-	PackageName []string `json:"packageName,omitempty"`
+	Path                       []string `json:"path,omitempty"`
+	PathNot                    []string `json:"pathNot,omitempty"`
+	Orphan                     *bool    `json:"orphan,omitempty"`
+	PackageName                []string `json:"packageName,omitempty"`
+	NumberOfDependentsLessThan *int     `json:"numberOfDependentsLessThan,omitempty"`
+	NumberOfDependentsMoreThan *int     `json:"numberOfDependentsMoreThan,omitempty"`
 }
 
 // To contains conditions matched against an imported dependency.

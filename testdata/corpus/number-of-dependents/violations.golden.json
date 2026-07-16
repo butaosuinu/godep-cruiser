@@ -1,0 +1,70 @@
+{
+  "name": "numberOfDependents: report a package below the direct-dependent threshold",
+  "positiveControls": [
+    {
+      "rule": "minimum-two-dependents",
+      "from": {
+        "path": "internal/app/one.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/hub",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "minimum-two-dependents",
+      "from": {
+        "path": "internal/app/two.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/hub",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "minimum-two-dependents",
+      "from": {
+        "path": "internal/hub/hub.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/leaf",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "minimum-two-dependents",
+      "from": {
+        "path": "internal/hub/hub_test.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/hub",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "minimum-two-dependents",
+      "from": {
+        "path": "internal/other/other.go",
+        "line": 3
+      },
+      "to": {
+        "path": "internal/hub",
+        "dependencyType": "local"
+      }
+    }
+  ],
+  "violations": [
+    {
+      "rule": "minimum-two-dependents",
+      "severity": "error",
+      "from": {
+        "path": "internal/leaf/leaf.go",
+        "line": 1
+      }
+    }
+  ]
+}

@@ -53,7 +53,8 @@ type Dependency struct {
 }
 
 // Violation describes one unsuppressed or baseline-known rule violation. To is
-// nil for source-only rules such as orphan, package-name, and required checks.
+// nil for source-only rules such as orphan, package-name, dependent-count, and
+// required checks.
 type Violation struct {
 	Rule     string
 	Comment  string

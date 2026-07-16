@@ -20,6 +20,8 @@ const goldenFilename = "violations.golden.json"
 
 var sourceOnlyRuleNames = map[string]struct{}{
 	"handler-requires-logging": {},
+	"maximum-two-dependents":   {},
+	"minimum-two-dependents":   {},
 	"no-orphans":               {},
 	"package-main-placement":   {},
 }
@@ -38,8 +40,8 @@ type Dependency struct {
 }
 
 // ExpectedViolation is the stable projection compared by future engine tests.
-// To is absent for source-only violations such as orphan, package-name, and
-// required rules.
+// To is absent for source-only violations such as orphan, package-name,
+// dependent-count, and required rules.
 type ExpectedViolation struct {
 	Rule     string      `json:"rule"`
 	Severity string      `json:"severity"`

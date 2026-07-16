@@ -30,6 +30,7 @@ func TestViolationCorpus(t *testing.T) {
 		"baseline-expiry",
 		"forbidden-import-target",
 		"layer-direction",
+		"number-of-dependents",
 		"orphan-file",
 		"package-main-placement",
 		"required-dependency",
@@ -714,6 +715,24 @@ func TestValidateViolationRuleShape(t *testing.T) {
 			name:      "package main rule rejects import target",
 			violation: ExpectedViolation{Rule: "package-main-placement", Severity: "error", From: location, To: edge},
 			wantError: `source-only rule "package-main-placement" must not set to`,
+		},
+		{
+			name:      "dependent count rule stays source-only",
+			violation: ExpectedViolation{Rule: "minimum-two-dependents", Severity: "error", From: location},
+		},
+		{
+			name:      "dependent count rule rejects import target",
+			violation: ExpectedViolation{Rule: "minimum-two-dependents", Severity: "error", From: location, To: edge},
+			wantError: `source-only rule "minimum-two-dependents" must not set to`,
+		},
+		{
+			name:      "dependent count upper-bound rule stays source-only",
+			violation: ExpectedViolation{Rule: "maximum-two-dependents", Severity: "error", From: location},
+		},
+		{
+			name:      "dependent count upper-bound rule rejects import target",
+			violation: ExpectedViolation{Rule: "maximum-two-dependents", Severity: "error", From: location, To: edge},
+			wantError: `source-only rule "maximum-two-dependents" must not set to`,
 		},
 		{
 			name:      "orphan rule stays source-only",

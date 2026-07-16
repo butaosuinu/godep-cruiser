@@ -30,7 +30,9 @@ func TestLoadValidConfiguration(t *testing.T) {
         "path": ["^cmd/([^/]+)/"],
         "pathNot": ["_test\\.go$"],
         "orphan": false,
-        "packageName": ["^main$"]
+        "packageName": ["^main$"],
+        "numberOfDependentsLessThan": 2,
+        "numberOfDependentsMoreThan": 0
       },
       "to": {
         "path": ["^internal/$1/"],
@@ -95,6 +97,12 @@ func TestLoadValidConfiguration(t *testing.T) {
 				}
 				if len(allFields.From.Path) != 1 || len(allFields.From.PathNot) != 1 || len(allFields.From.PackageName) != 1 {
 					t.Errorf("From regex fields not loaded: %#v", allFields.From)
+				}
+				if allFields.From.NumberOfDependentsLessThan == nil ||
+					*allFields.From.NumberOfDependentsLessThan != 2 ||
+					allFields.From.NumberOfDependentsMoreThan == nil ||
+					*allFields.From.NumberOfDependentsMoreThan != 0 {
+					t.Errorf("From dependent-count fields not loaded: %#v", allFields.From)
 				}
 				if len(allFields.To.Path) != 1 || len(allFields.To.PathNot) != 1 {
 					t.Errorf("To regex fields not loaded: %#v", allFields.To)
@@ -235,12 +243,21 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "allowed rule severity is unsupported", input: `{"allowed":[{"name":"x","severity":"error","from":{},"to":{}}]}`, wantPath: "$.allowed[0].severity", wantText: `unknown field "severity"`},
 		{name: "required to must define a condition", input: `{"required":[{"name":"x","from":{},"to":{}}]}`, wantPath: "$.required[0].to", wantText: "must define at least one condition"},
 		{name: "required from orphan is unsupported", input: `{"required":[{"name":"x","from":{"orphan":false},"to":{"path":["a"]}}]}`, wantPath: "$.required[0].from.orphan", wantText: `unknown field "orphan"`},
+		{name: "required from dependent count is unsupported", input: `{"required":[{"name":"x","from":{"numberOfDependentsMoreThan":0},"to":{"path":["a"]}}]}`, wantPath: "$.required[0].from.numberOfDependentsMoreThan", wantText: `unknown field "numberOfDependentsMoreThan"`},
 		{name: "unknown from field", input: validRule(`"from":{"reachable":true}`), wantPath: "$.forbidden[0].from.reachable", wantText: `unknown field "reachable"`},
 		{name: "unknown to field", input: validRule(`"to":{"couldNotResolve":true}`), wantPath: "$.forbidden[0].to.couldNotResolve", wantText: `unknown field "couldNotResolve"`},
 		{name: "path must be array", input: validRule(`"from":{"path":"^cmd/"}`), wantPath: "$.forbidden[0].from.path", wantText: "must be an array"},
 		{name: "path cannot be empty array", input: validRule(`"from":{"path":[]}`), wantPath: "$.forbidden[0].from.path", wantText: "at least one item"},
 		{name: "path items must be strings", input: validRule(`"from":{"path":[null]}`), wantPath: "$.forbidden[0].from.path[0]", wantText: "must be a string"},
 		{name: "orphan must be boolean", input: validRule(`"from":{"orphan":null}`), wantPath: "$.forbidden[0].from.orphan", wantText: "must be a boolean"},
+		{name: "dependent count must be a number", input: validRule(`"from":{"numberOfDependentsMoreThan":"0"}`), wantPath: "$.forbidden[0].from.numberOfDependentsMoreThan", wantText: "must be a number"},
+		{name: "negative dependent count is rejected", input: validRule(`"from":{"numberOfDependentsMoreThan":-1}`), wantPath: "$.forbidden[0].from.numberOfDependentsMoreThan", wantText: "non-negative integer"},
+		{name: "fractional dependent count is rejected", input: validRule(`"from":{"numberOfDependentsLessThan":1.5}`), wantPath: "$.forbidden[0].from.numberOfDependentsLessThan", wantText: "without decimal or exponent notation"},
+		{name: "exponent dependent count is rejected", input: validRule(`"from":{"numberOfDependentsMoreThan":1e2}`), wantPath: "$.forbidden[0].from.numberOfDependentsMoreThan", wantText: "without decimal or exponent notation"},
+		{name: "oversized dependent count is rejected", input: validRule(`"from":{"numberOfDependentsMoreThan":999999999999999999999999}`), wantPath: "$.forbidden[0].from.numberOfDependentsMoreThan", wantText: "representable as an int"},
+		{name: "less than zero is degenerate", input: validRule(`"from":{"numberOfDependentsLessThan":0}`), wantPath: "$.forbidden[0].from.numberOfDependentsLessThan", wantText: "must be at least 1"},
+		{name: "equal dependent count bounds have no integer", input: validRule(`"from":{"numberOfDependentsLessThan":3,"numberOfDependentsMoreThan":3}`), wantPath: "$.forbidden[0].from.numberOfDependentsMoreThan", wantText: "empty integer range"},
+		{name: "adjacent dependent count bounds have no integer", input: validRule(`"from":{"numberOfDependentsLessThan":3,"numberOfDependentsMoreThan":2}`), wantPath: "$.forbidden[0].from.numberOfDependentsMoreThan", wantText: "empty integer range"},
 		{name: "invalid from path regex", input: validRule(`"from":{"path":["("]}`), wantPath: "$.forbidden[0].from.path[0]", wantText: "invalid regular expression"},
 		{name: "invalid from pathNot regex", input: validRule(`"from":{"pathNot":["["]}`), wantPath: "$.forbidden[0].from.pathNot[0]", wantText: "invalid regular expression"},
 		{name: "invalid packageName regex", input: validRule(`"from":{"packageName":["*"]}`), wantPath: "$.forbidden[0].from.packageName[0]", wantText: "invalid regular expression"},
@@ -307,6 +324,68 @@ func TestLoadReportsExactRegexPosition(t *testing.T) {
 	}
 	if configErr.Line != 5 || configErr.Column != 16 {
 		t.Errorf("position = %d:%d, want 5:16", configErr.Line, configErr.Column)
+	}
+}
+
+func TestLoadReportsExactDependentCountPosition(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		fromFields string
+		wantPath   string
+		wantLine   int
+	}{
+		{
+			name:       "negative value",
+			fromFields: `      "numberOfDependentsMoreThan": -1`,
+			wantPath:   "$.forbidden[0].from.numberOfDependentsMoreThan",
+			wantLine:   5,
+		},
+		{
+			name:       "fractional value",
+			fromFields: `      "numberOfDependentsLessThan": 1.5`,
+			wantPath:   "$.forbidden[0].from.numberOfDependentsLessThan",
+			wantLine:   5,
+		},
+		{
+			name: "empty integer range",
+			fromFields: "      \"numberOfDependentsLessThan\": 3,\n" +
+				`      "numberOfDependentsMoreThan": 2`,
+			wantPath: "$.forbidden[0].from.numberOfDependentsMoreThan",
+			wantLine: 6,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			input := "{\n" +
+				"  \"forbidden\": [{\n" +
+				"    \"name\": \"invalid-count\",\n" +
+				"    \"from\": {\n" +
+				test.fromFields + "\n" +
+				"    },\n" +
+				"    \"to\": {}\n" +
+				"  }]\n" +
+				"}"
+			_, err := Parse([]byte(input))
+			var configErr *Error
+			if !errors.As(err, &configErr) {
+				t.Fatalf("Parse() error = %v, want *config.Error", err)
+			}
+			if configErr.Path != test.wantPath || configErr.Line != test.wantLine || configErr.Column != 37 {
+				t.Errorf(
+					"position = %s %d:%d, want %s %d:37",
+					configErr.Path,
+					configErr.Line,
+					configErr.Column,
+					test.wantPath,
+					test.wantLine,
+				)
+			}
+		})
 	}
 }
 
@@ -493,7 +572,7 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		want       []string
 	}{
 		{name: "configuration", properties: schema.Properties, want: []string{"forbidden", "required", "allowed", "allowedSeverity"}},
-		{name: "from", properties: schema.Definitions["from"].Properties, want: []string{"path", "pathNot", "orphan", "packageName"}},
+		{name: "from", properties: schema.Definitions["from"].Properties, want: []string{"path", "pathNot", "orphan", "packageName", "numberOfDependentsLessThan", "numberOfDependentsMoreThan"}},
 		{name: "required from", properties: schema.Definitions["requiredFrom"].Properties, want: []string{"path", "pathNot", "packageName"}},
 		{name: "to", properties: schema.Definitions["to"].Properties, want: []string{"path", "pathNot", "dependencyTypes", "dependencyTypesNot"}},
 		{name: "forbidden rule", properties: schema.Definitions["forbiddenRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
@@ -553,6 +632,29 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		if nameProperty.Reference != "#/$defs/ruleName" {
 			t.Errorf("%s name reference = %q, want #/$defs/ruleName", definition, nameProperty.Reference)
 		}
+	}
+	dependentCountTests := []struct {
+		name    string
+		minimum int
+	}{
+		{name: "numberOfDependentsLessThan", minimum: 1},
+		{name: "numberOfDependentsMoreThan", minimum: 0},
+	}
+	for _, test := range dependentCountTests {
+		t.Run(test.name+" schema", func(t *testing.T) {
+			t.Parallel()
+
+			var property struct {
+				Type    string `json:"type"`
+				Minimum *int   `json:"minimum"`
+			}
+			if err := json.Unmarshal(schema.Definitions["from"].Properties[test.name], &property); err != nil {
+				t.Fatalf("decode from.%s: %v", test.name, err)
+			}
+			if property.Type != "integer" || property.Minimum == nil || *property.Minimum != test.minimum {
+				t.Errorf("from.%s schema = %#v, want integer minimum %d", test.name, property, test.minimum)
+			}
+		})
 	}
 
 	var requiredTo struct {
