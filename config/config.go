@@ -116,11 +116,16 @@ type From struct {
 // rules. Folder scope uses module-relative package paths. Pattern and
 // dependency-type slices use OR semantics within a field and AND semantics
 // across fields. Pointer fields distinguish omitted conditions from false.
+// ReachableFilePathNot contains ordinary Go regular expressions that
+// exclude files from transitive local-package edges by scan-root-relative
+// path. An edge remains when any file forming it is not excluded, and
+// from.path captures are not expanded.
 type To struct {
-	Path               []string         `json:"path,omitempty"`
-	PathNot            []string         `json:"pathNot,omitempty"`
-	Reachable          *bool            `json:"reachable,omitempty"`
-	MoreUnstable       *bool            `json:"moreUnstable,omitempty"`
-	DependencyTypes    []DependencyType `json:"dependencyTypes,omitempty"`
-	DependencyTypesNot []DependencyType `json:"dependencyTypesNot,omitempty"`
+	Path                 []string         `json:"path,omitempty"`
+	PathNot              []string         `json:"pathNot,omitempty"`
+	Reachable            *bool            `json:"reachable,omitempty"`
+	ReachableFilePathNot []string         `json:"reachableFilePathNot,omitempty"`
+	MoreUnstable         *bool            `json:"moreUnstable,omitempty"`
+	DependencyTypes      []DependencyType `json:"dependencyTypes,omitempty"`
+	DependencyTypesNot   []DependencyType `json:"dependencyTypesNot,omitempty"`
 }

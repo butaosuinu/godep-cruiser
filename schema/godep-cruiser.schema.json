@@ -168,6 +168,10 @@
           "type": "boolean",
           "description": "Matches packages by transitive reachability in the local dependency graph. True reports reachable targets; false reports unreachable targets."
         },
+        "reachableFilePathNot": {
+          "$ref": "#/$defs/regexArray",
+          "description": "Regular expressions that exclude files forming transitive local-package edges by scan-root-relative path. An edge remains traversable when any file forming it is not excluded. Available only with reachable and does not expand from.path captures."
+        },
         "moreUnstable": {
           "type": "boolean",
           "const": true,
@@ -233,6 +237,11 @@
               }
             }
           }
+        },
+        "reachableFilePathNot": {
+          "required": [
+            "reachable"
+          ]
         }
       }
     },
@@ -303,6 +312,11 @@
                     {
                       "required": [
                         "reachable"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "reachableFilePathNot"
                       ]
                     },
                     {

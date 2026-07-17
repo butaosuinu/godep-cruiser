@@ -139,6 +139,11 @@ func validateToSlices(to config.To, prefix string) error {
 		{path: prefix + ".path", present: to.Path != nil, empty: len(to.Path) == 0},
 		{path: prefix + ".pathNot", present: to.PathNot != nil, empty: len(to.PathNot) == 0},
 		{
+			path:    prefix + ".reachableFilePathNot",
+			present: to.ReachableFilePathNot != nil,
+			empty:   len(to.ReachableFilePathNot) == 0,
+		},
+		{
 			path:    prefix + ".dependencyTypes",
 			present: to.DependencyTypes != nil,
 			empty:   len(to.DependencyTypes) == 0,

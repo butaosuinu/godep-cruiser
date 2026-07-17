@@ -220,6 +220,13 @@ func TestValidateRejectsEmptyProgrammaticMatcherSlices(t *testing.T) {
 			wantPath: "$.forbidden[0].to.pathNot",
 		},
 		{
+			name: "forbidden to reachableFilePathNot",
+			configuration: config.Config{Forbidden: []config.ForbiddenRule{{
+				Name: "rule", From: config.From{}, To: config.To{ReachableFilePathNot: []string{}},
+			}}},
+			wantPath: "$.forbidden[0].to.reachableFilePathNot",
+		},
+		{
 			name: "forbidden to dependencyTypes",
 			configuration: config.Config{Forbidden: []config.ForbiddenRule{{
 				Name: "rule", From: config.From{}, To: config.To{DependencyTypes: []config.DependencyType{}},

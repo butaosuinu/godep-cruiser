@@ -113,7 +113,8 @@ capture references, unknown fields, and source positions.
       "to": {
         "path": ["^internal/"],
         "pathNot": ["^internal/testutil(/|$)"],
-        "reachable": false
+        "reachable": false,
+        "reachableFilePathNot": ["_test\\.go$"]
       }
     },
     {
@@ -192,6 +193,20 @@ every file in a matching target package outside their transitive closure. Both
 forms require `to.path`, allow `to.pathNot`, and reject dependency-type fields.
 Capture references remain available for `true` but are invalid for `false`;
 allowed and required rules do not accept `reachable`.
+
+`to.reachableFilePathNot` optionally excludes transitive local-package edges by
+the scan-root-relative, slash-separated paths of the files that form them. It
+is a non-empty regular-expression array available only with `to.reachable`, and
+it does not expand `from.path` captures. The field is opt-in: omitting it keeps
+all edges, including edges formed only by `_test.go` files. If both production
+and excluded files form the same package edge, the edge remains traversable;
+the filter removes an edge only when every file forming it is excluded.
+
+For `reachable: true`, the filter starts after each matching source file's
+initiating local import, so `from.pathNot` remains the way to exclude seed
+files. For `reachable: false`, it applies to every edge followed from the seed
+packages. Filtering changes closure membership only; violation shapes and
+baseline identities remain unchanged.
 
 `from.numberOfDependentsLessThan` and
 `from.numberOfDependentsMoreThan` compare the source package's distinct direct

@@ -169,6 +169,12 @@ func TestLoadValidConfiguration(t *testing.T) {
 				if got.Forbidden[0].To.MoreUnstable != nil {
 					t.Errorf("default MoreUnstable = %v, want nil", got.Forbidden[0].To.MoreUnstable)
 				}
+				if got.Forbidden[0].To.ReachableFilePathNot != nil {
+					t.Errorf(
+						"default ReachableFilePathNot = %#v, want nil",
+						got.Forbidden[0].To.ReachableFilePathNot,
+					)
+				}
 				if got.AllowedSeverity != SeverityWarn {
 					t.Errorf("default AllowedSeverity = %q, want %q", got.AllowedSeverity, SeverityWarn)
 				}
@@ -263,7 +269,7 @@ func TestLoadValidConfiguration(t *testing.T) {
 			},
 		},
 		{
-			name: "reachable true allows captures and pathNot",
+			name: "reachable true allows captures pathNot and ordinary file regexes",
 			input: `{
   "forbidden": [{
     "name": "reachable-capture",
@@ -271,6 +277,7 @@ func TestLoadValidConfiguration(t *testing.T) {
     "to": {
       "path": ["^internal/$1/"],
       "pathNot": ["^internal/$1/allowed$"],
+      "reachableFilePathNot": ["_test\\.go$", "[$1]"],
       "reachable": true
     }
   }]
@@ -284,6 +291,10 @@ func TestLoadValidConfiguration(t *testing.T) {
 				if len(got.Forbidden[0].To.PathNot) != 1 {
 					t.Errorf("PathNot = %#v, want one exclusion", got.Forbidden[0].To.PathNot)
 				}
+				if got := got.Forbidden[0].To.ReachableFilePathNot; len(got) != 2 ||
+					got[0] != `_test\.go$` || got[1] != `[$1]` {
+					t.Errorf("ReachableFilePathNot = %#v, want ordinary regexes without capture expansion", got)
+				}
 			},
 		},
 		{
@@ -295,6 +306,7 @@ func TestLoadValidConfiguration(t *testing.T) {
     "to": {
       "path": ["^internal/"],
       "pathNot": ["/generated$"],
+      "reachableFilePathNot": ["_test\\.go$"],
       "reachable": false
     }
   }]
@@ -307,6 +319,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 				}
 				if len(got.Forbidden[0].To.PathNot) != 1 {
 					t.Errorf("PathNot = %#v, want one exclusion", got.Forbidden[0].To.PathNot)
+				}
+				if got := got.Forbidden[0].To.ReachableFilePathNot; len(got) != 1 || got[0] != `_test\.go$` {
+					t.Errorf("ReachableFilePathNot = %#v, want one test-file exclusion", got)
 				}
 			},
 		},
@@ -360,6 +375,7 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "folder scope rejects orphan", input: `{"forbidden":[{"name":"x","scope":"folder","from":{"orphan":false},"to":{}}]}`, wantPath: "$.forbidden[0].from.orphan", wantText: `cannot be combined with scope "folder"`},
 		{name: "folder scope rejects package name", input: `{"forbidden":[{"name":"x","scope":"folder","from":{"packageName":["main"]},"to":{}}]}`, wantPath: "$.forbidden[0].from.packageName", wantText: `cannot be combined with scope "folder"`},
 		{name: "folder scope rejects reachable", input: `{"forbidden":[{"name":"x","scope":"folder","from":{},"to":{"path":["a"],"reachable":true}}]}`, wantPath: "$.forbidden[0].to.reachable", wantText: `cannot be combined with scope "folder"`},
+		{name: "folder scope rejects reachable file path exclusions", input: `{"forbidden":[{"name":"x","scope":"folder","from":{},"to":{"path":["a"],"reachableFilePathNot":["_test\\.go$"]}}]}`, wantPath: "$.forbidden[0].to.reachableFilePathNot", wantText: `cannot be combined with scope "folder"`},
 		{name: "folder scope rejects dependency types", input: `{"forbidden":[{"name":"x","scope":"folder","from":{},"to":{"dependencyTypes":["local"]}}]}`, wantPath: "$.forbidden[0].to.dependencyTypes", wantText: `cannot be combined with scope "folder"`},
 		{name: "folder scope rejects excluded dependency types", input: `{"forbidden":[{"name":"x","scope":"folder","from":{},"to":{"dependencyTypesNot":["unresolved"]}}]}`, wantPath: "$.forbidden[0].to.dependencyTypesNot", wantText: `cannot be combined with scope "folder"`},
 		{name: "allowed rule severity is unsupported", input: `{"allowed":[{"name":"x","severity":"error","from":{},"to":{}}]}`, wantPath: "$.allowed[0].severity", wantText: `unknown field "severity"`},
@@ -372,8 +388,15 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "required reachable is unsupported", input: `{"required":[{"name":"x","from":{},"to":{"path":["a"],"reachable":true}}]}`, wantPath: "$.required[0].to.reachable", wantText: `unknown field "reachable"`},
 		{name: "allowed moreUnstable is unsupported", input: `{"allowed":[{"name":"x","from":{},"to":{"moreUnstable":true}}]}`, wantPath: "$.allowed[0].to.moreUnstable", wantText: `unknown field "moreUnstable"`},
 		{name: "required moreUnstable is unsupported", input: `{"required":[{"name":"x","from":{},"to":{"moreUnstable":true}}]}`, wantPath: "$.required[0].to.moreUnstable", wantText: `unknown field "moreUnstable"`},
+		{name: "allowed reachable file path exclusions are unsupported", input: `{"allowed":[{"name":"x","from":{},"to":{"path":["a"],"reachableFilePathNot":["_test\\.go$"]}}]}`, wantPath: "$.allowed[0].to.reachableFilePathNot", wantText: `unknown field "reachableFilePathNot"`},
+		{name: "required reachable file path exclusions are unsupported", input: `{"required":[{"name":"x","from":{},"to":{"path":["a"],"reachableFilePathNot":["_test\\.go$"]}}]}`, wantPath: "$.required[0].to.reachableFilePathNot", wantText: `unknown field "reachableFilePathNot"`},
 		{name: "reachable must be boolean", input: validRule(`"to":{"path":["a"],"reachable":null}`), wantPath: "$.forbidden[0].to.reachable", wantText: "must be a boolean"},
 		{name: "reachable false requires path", input: validRule(`"to":{"pathNot":["a"],"reachable":false}`), wantPath: "$.forbidden[0].to", wantText: `field "reachable" requires field "path"`},
+		{name: "reachable file path exclusions require reachable", input: validRule(`"to":{"path":["a"],"reachableFilePathNot":["_test\\.go$"]}`), wantPath: "$.forbidden[0].to.reachableFilePathNot", wantText: `field "reachableFilePathNot" requires field "reachable"`},
+		{name: "reachable file path exclusions must be an array", input: validRule(`"to":{"path":["a"],"reachable":true,"reachableFilePathNot":"_test\\.go$"}`), wantPath: "$.forbidden[0].to.reachableFilePathNot", wantText: "must be an array"},
+		{name: "reachable file path exclusions cannot be empty", input: validRule(`"to":{"path":["a"],"reachable":true,"reachableFilePathNot":[]}`), wantPath: "$.forbidden[0].to.reachableFilePathNot", wantText: "at least one item"},
+		{name: "reachable file path exclusion items must be strings", input: validRule(`"to":{"path":["a"],"reachable":true,"reachableFilePathNot":[null]}`), wantPath: "$.forbidden[0].to.reachableFilePathNot[0]", wantText: "must be a string"},
+		{name: "invalid reachable file path exclusion regex", input: validRule(`"to":{"path":["a"],"reachable":true,"reachableFilePathNot":["("]}`), wantPath: "$.forbidden[0].to.reachableFilePathNot[0]", wantText: "invalid regular expression"},
 		{name: "reachable rejects dependency types", input: validRule(`"to":{"path":["a"],"reachable":true,"dependencyTypes":["local"]}`), wantPath: "$.forbidden[0].to.dependencyTypes", wantText: `cannot be combined with "reachable"`},
 		{name: "reachable false rejects excluded dependency types", input: validRule(`"to":{"path":["a"],"reachable":false,"dependencyTypesNot":["unresolved"]}`), wantPath: "$.forbidden[0].to.dependencyTypesNot", wantText: `cannot be combined with "reachable"`},
 		{name: "reachable false rejects path capture", input: `{"forbidden":[{"name":"x","from":{"path":["^cmd/([^/]+)/"]},"to":{"path":["^internal/$1/"],"reachable":false}}]}`, wantPath: "$.forbidden[0].to.path[0]", wantText: "capture references are not allowed with reachable: false"},
@@ -715,7 +738,7 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		{name: "from", properties: schema.Definitions["from"].Properties, want: []string{"path", "pathNot", "orphan", "packageName", "numberOfDependentsLessThan", "numberOfDependentsMoreThan"}},
 		{name: "required from", properties: schema.Definitions["requiredFrom"].Properties, want: []string{"path", "pathNot", "packageName"}},
 		{name: "to", properties: schema.Definitions["to"].Properties, want: []string{"path", "pathNot", "dependencyTypes", "dependencyTypesNot"}},
-		{name: "forbidden to", properties: schema.Definitions["forbiddenTo"].Properties, want: []string{"path", "pathNot", "reachable", "moreUnstable", "dependencyTypes", "dependencyTypesNot"}},
+		{name: "forbidden to", properties: schema.Definitions["forbiddenTo"].Properties, want: []string{"path", "pathNot", "reachable", "reachableFilePathNot", "moreUnstable", "dependencyTypes", "dependencyTypesNot"}},
 		{name: "forbidden rule", properties: schema.Definitions["forbiddenRule"].Properties, want: []string{"name", "comment", "severity", "scope", "from", "to"}},
 		{name: "required rule", properties: schema.Definitions["requiredRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
 		{name: "allowed rule", properties: schema.Definitions["allowedRule"].Properties, want: []string{"name", "comment", "from", "to"}},
@@ -833,10 +856,11 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		t.Errorf("folder from conflicts = %v, want orphan and packageName", fromConflicts)
 	}
 	toConflicts := folderConflicts("to")
-	if len(toConflicts) != 3 || !toConflicts["reachable"] ||
+	if len(toConflicts) != 4 || !toConflicts["reachable"] ||
+		!toConflicts["reachableFilePathNot"] ||
 		!toConflicts["dependencyTypes"] || !toConflicts["dependencyTypesNot"] {
 		t.Errorf(
-			"folder to conflicts = %v, want reachable, dependencyTypes, and dependencyTypesNot",
+			"folder to conflicts = %v, want reachable, reachableFilePathNot, dependencyTypes, and dependencyTypesNot",
 			toConflicts,
 		)
 	}
@@ -882,6 +906,22 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 	}
 	if moreUnstableProperty.Type != "boolean" || moreUnstableProperty.Const == nil || !*moreUnstableProperty.Const {
 		t.Errorf("forbiddenTo moreUnstable schema = %#v, want boolean const true", moreUnstableProperty)
+	}
+
+	var reachableFilePathNotProperty struct {
+		Reference string `json:"$ref"`
+	}
+	if err := json.Unmarshal(
+		schema.Definitions["forbiddenTo"].Properties["reachableFilePathNot"],
+		&reachableFilePathNotProperty,
+	); err != nil {
+		t.Fatalf("decode forbiddenTo reachableFilePathNot property: %v", err)
+	}
+	if reachableFilePathNotProperty.Reference != "#/$defs/regexArray" {
+		t.Errorf(
+			"forbiddenTo reachableFilePathNot reference = %q, want #/$defs/regexArray",
+			reachableFilePathNotProperty.Reference,
+		)
 	}
 
 	ruleToTests := []struct {
@@ -930,6 +970,21 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		t.Errorf(
 			"reachable conflicting fields = %v, want moreUnstable, dependencyTypes, and dependencyTypesNot",
 			conflicts,
+		)
+	}
+	var reachableFilePathNotDependencies struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(
+		schema.Definitions["forbiddenTo"].DependentSchemas["reachableFilePathNot"],
+		&reachableFilePathNotDependencies,
+	); err != nil {
+		t.Fatalf("decode forbiddenTo reachableFilePathNot dependencies: %v", err)
+	}
+	if strings.Join(reachableFilePathNotDependencies.Required, ",") != "reachable" {
+		t.Errorf(
+			"reachableFilePathNot required fields = %q, want reachable",
+			reachableFilePathNotDependencies.Required,
 		)
 	}
 

@@ -1,5 +1,5 @@
 {
-  "name": "reachable: reject only the source whose local import reaches test helpers",
+  "name": "reachable: unfiltered test edge over-detects while the filtered rule stays clean",
   "positiveControls": [
     {
       "rule": "production-no-testutil",

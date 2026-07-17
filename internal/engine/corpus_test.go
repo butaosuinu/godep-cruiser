@@ -165,15 +165,27 @@ func corpusConfigurations() map[string]config.Config {
 			}},
 		},
 		"reachable-test-helper": {
-			Forbidden: []config.ForbiddenRule{{
-				Name:     "production-no-testutil",
-				Severity: config.SeverityError,
-				From:     config.From{Path: []string{`^internal/app/`}},
-				To: config.To{
-					Path:      []string{`^internal/testutil$`},
-					Reachable: &reachable,
+			Forbidden: []config.ForbiddenRule{
+				{
+					Name:     "production-no-testutil",
+					Severity: config.SeverityError,
+					From:     config.From{Path: []string{`^internal/app/`}},
+					To: config.To{
+						Path:      []string{`^internal/testutil$`},
+						Reachable: &reachable,
+					},
 				},
-			}},
+				{
+					Name:     "production-no-testutil-without-test-edges",
+					Severity: config.SeverityError,
+					From:     config.From{Path: []string{`^internal/app/`}},
+					To: config.To{
+						Path:                 []string{`^internal/testutil$`},
+						Reachable:            &reachable,
+						ReachableFilePathNot: []string{`_test\.go$`},
+					},
+				},
+			},
 		},
 		"required-dependency": {
 			Required: []config.RequiredRule{{
@@ -233,15 +245,27 @@ func corpusConfigurations() map[string]config.Config {
 			AllowedSeverity: config.SeverityError,
 		},
 		"unreachable-dead-code": {
-			Forbidden: []config.ForbiddenRule{{
-				Name:     "entrypoint-reaches-production",
-				Severity: config.SeverityError,
-				From:     config.From{Path: []string{`^cmd/app/`}},
-				To: config.To{
-					Path:      []string{`^internal/`},
-					Reachable: &unreachable,
+			Forbidden: []config.ForbiddenRule{
+				{
+					Name:     "entrypoint-reaches-production",
+					Severity: config.SeverityError,
+					From:     config.From{Path: []string{`^cmd/app/`}},
+					To: config.To{
+						Path:                 []string{`^internal/`},
+						Reachable:            &unreachable,
+						ReachableFilePathNot: []string{`_test\.go$`},
+					},
 				},
-			}},
+				{
+					Name:     "entrypoint-reaches-production-with-test-edges",
+					Severity: config.SeverityError,
+					From:     config.From{Path: []string{`^cmd/app/`}},
+					To: config.To{
+						Path:      []string{`^internal/`},
+						Reachable: &unreachable,
+					},
+				},
+			},
 		},
 	}
 }

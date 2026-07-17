@@ -309,7 +309,7 @@ func (validator configValidator) to(
 		"dependencyTypesNot",
 	}
 	if kind == forbiddenRuleKind {
-		allowedFields = append(allowedFields, "reachable", "moreUnstable")
+		allowedFields = append(allowedFields, "reachable", "reachableFilePathNot", "moreUnstable")
 	}
 	fields, err := validator.object(
 		node,
@@ -323,7 +323,12 @@ func (validator configValidator) to(
 		return validator.at(node, path, errors.New("must define at least one condition"))
 	}
 	if ruleScope == ScopeFolder {
-		for _, conflict := range []string{"reachable", "dependencyTypes", "dependencyTypesNot"} {
+		for _, conflict := range []string{
+			"reachable",
+			"reachableFilePathNot",
+			"dependencyTypes",
+			"dependencyTypesNot",
+		} {
 			if member, ok := fields[conflict]; ok {
 				return validator.at(
 					member.value,
@@ -373,6 +378,21 @@ func (validator configValidator) to(
 			}
 		}
 		allowCaptures = reachable
+	}
+	if member, ok := fields["reachableFilePathNot"]; ok {
+		if _, reachable := fields["reachable"]; !reachable {
+			return validator.at(
+				member.value,
+				fieldPath(path, "reachableFilePathNot"),
+				errors.New(`field "reachableFilePathNot" requires field "reachable"`),
+			)
+		}
+		if _, err := validator.regularExpressions(
+			member.value,
+			fieldPath(path, "reachableFilePathNot"),
+		); err != nil {
+			return err
+		}
 	}
 
 	if member, ok := fields["path"]; ok {

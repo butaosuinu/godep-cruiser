@@ -1,5 +1,5 @@
 {
-  "name": "unreachable: report every file in a package outside the entrypoint closure",
+  "name": "unreachable: filtered test edge exposes dead files missed by the unfiltered rule",
   "violations": [
     {
       "rule": "entrypoint-reaches-production",
