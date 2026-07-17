@@ -7,7 +7,7 @@ import (
 	"github.com/butaosuinu/godep-cruiser/internal/reporter"
 )
 
-// OutputType selects the err, JSON, Mermaid, or GraphViz DOT report
+// OutputType selects the err, JSON, Mermaid, GraphViz DOT, or HTML report
 // representation.
 type OutputType string
 
@@ -17,6 +17,7 @@ const (
 	OutputTypeJSON    OutputType = "json"
 	OutputTypeMermaid OutputType = "mermaid"
 	OutputTypeDOT     OutputType = "dot"
+	OutputTypeHTML    OutputType = "html"
 )
 
 // WriteReport writes unsuppressed violations and stale baseline entries in the
@@ -36,6 +37,8 @@ func WriteReport(writer io.Writer, outputType OutputType, result Result) error {
 		return reporter.WriteMermaidReport(writer, report)
 	case OutputTypeDOT:
 		return reporter.WriteDOTReport(writer, report)
+	case OutputTypeHTML:
+		return reporter.WriteHTMLReport(writer, report)
 	default:
 		return fmt.Errorf("unknown output type %q", outputType)
 	}

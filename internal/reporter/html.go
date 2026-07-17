@@ -1,0 +1,274 @@
+package reporter
+
+import (
+	"fmt"
+	"html/template"
+	"io"
+
+	"github.com/butaosuinu/godep-cruiser/internal/engine"
+)
+
+var htmlReportTemplate = template.Must(template.New("report").Parse(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>godep-cruiser report</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --background: #f6f8fa;
+      --surface: #ffffff;
+      --border: #d0d7de;
+      --text: #1f2328;
+      --muted: #59636e;
+      --error: #cf222e;
+      --warn: #9a6700;
+      --info: #0969da;
+      --ignore: #656d76;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--background);
+      color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    main {
+      width: min(1200px, calc(100% - 2rem));
+      margin: 0 auto;
+      padding: 2rem 0 3rem;
+    }
+
+    h1,
+    h2,
+    p {
+      margin-top: 0;
+    }
+
+    h1 {
+      margin-bottom: 0.25rem;
+      font-size: clamp(1.75rem, 4vw, 2.5rem);
+      line-height: 1.2;
+    }
+
+    h2 {
+      margin-bottom: 1rem;
+      font-size: 1.25rem;
+    }
+
+    .subtitle,
+    .summary-note,
+    .empty {
+      color: var(--muted);
+    }
+
+    section {
+      margin-top: 1.5rem;
+      padding: 1.25rem;
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      background: var(--surface);
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+      gap: 0.75rem;
+      margin: 0;
+    }
+
+    .summary-item {
+      padding: 0.75rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+    }
+
+    .summary-item dt {
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .summary-item dd {
+      margin: 0.25rem 0 0;
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+
+    .summary-note {
+      margin: 0.75rem 0 0;
+      font-size: 0.875rem;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    th,
+    td {
+      padding: 0.75rem;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 0.75rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .severity {
+      display: inline-block;
+      padding: 0.125rem 0.5rem;
+      border: 1px solid currentColor;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .severity[data-severity="error"] {
+      color: var(--error);
+    }
+
+    .severity[data-severity="warn"] {
+      color: var(--warn);
+    }
+
+    .severity[data-severity="info"] {
+      color: var(--info);
+    }
+
+    .severity[data-severity="ignore"] {
+      color: var(--ignore);
+    }
+
+    .stale-label {
+      color: var(--error);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>godep-cruiser report</h1>
+      <p class="subtitle">Dependency rule violations and stale baseline entries.</p>
+    </header>
+
+    <section aria-labelledby="summary-heading">
+      <h2 id="summary-heading">Summary</h2>
+      <dl class="summary-grid">
+        <div class="summary-item"><dt>Total</dt><dd>{{.Summary.Total}}</dd></div>
+        <div class="summary-item"><dt>Error</dt><dd>{{.Summary.Error}}</dd></div>
+        <div class="summary-item"><dt>Warn</dt><dd>{{.Summary.Warn}}</dd></div>
+        <div class="summary-item"><dt>Info</dt><dd>{{.Summary.Info}}</dd></div>
+        <div class="summary-item"><dt>Ignore</dt><dd>{{.Summary.Ignore}}</dd></div>
+      </dl>
+      <p class="summary-note">Stale baseline entries count as errors.</p>
+    </section>
+
+    <section aria-labelledby="violations-heading">
+      <h2 id="violations-heading">Violations</h2>
+      {{if .Violations}}<div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Rule</th>
+              <th scope="col">Severity</th>
+              <th scope="col">Kind</th>
+              <th scope="col">From</th>
+              <th scope="col">To</th>
+              <th scope="col">Comment</th>
+            </tr>
+          </thead>
+          <tbody>{{range .Violations}}
+            <tr>
+              <td>{{.Rule}}</td>
+              <td><span class="severity" data-severity="{{.Severity}}">{{.Severity}}</span></td>
+              <td>{{.Kind}}</td>
+              <td><code>{{.From.Path}}{{if .From.Line}}:{{.From.Line}}{{end}}</code></td>
+              <td>{{with .To}}<code>{{.Path}}</code>{{if .Type}} ({{.Type}}){{end}}{{else}}source-only{{end}}</td>
+              <td>{{if .Comment}}{{.Comment}}{{else}}&mdash;{{end}}</td>
+            </tr>{{end}}
+          </tbody>
+        </table>
+      </div>{{else}}<p class="empty">No violations.</p>{{end}}
+    </section>
+
+    <section aria-labelledby="stale-heading">
+      <h2 id="stale-heading">Stale baseline entries</h2>
+      {{if .Stale}}<div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Rule</th>
+              <th scope="col">From</th>
+              <th scope="col">To</th>
+              <th scope="col">Message</th>
+            </tr>
+          </thead>
+          <tbody>{{range .Stale}}
+            <tr>
+              <td>{{.Entry.Rule}}</td>
+              <td><code>{{.Entry.From}}</code></td>
+              <td>{{with .Entry.To}}<code>{{.}}</code>{{else}}source-only{{end}}</td>
+              <td><span class="stale-label">error:</span> {{.Error}}</td>
+            </tr>{{end}}
+          </tbody>
+        </table>
+      </div>{{else}}<p class="empty">No stale baseline entries.</p>{{end}}
+    </section>
+  </main>
+</body>
+</html>
+`))
+
+type htmlReportData struct {
+	Report
+	Summary Summary
+}
+
+// WriteHTML writes violations as a self-contained HTML document.
+func WriteHTML(writer io.Writer, violations []engine.Violation) error {
+	return WriteHTMLReport(writer, Report{Violations: violations})
+}
+
+// WriteHTMLReport writes report as a self-contained HTML document with inline
+// CSS and no scripts or external assets.
+func WriteHTMLReport(writer io.Writer, report Report) error {
+	data := htmlReportData{
+		Report:  report,
+		Summary: SummarizeReport(report),
+	}
+	if err := htmlReportTemplate.Execute(writer, data); err != nil {
+		return fmt.Errorf("write HTML report: %w", err)
+	}
+
+	return nil
+}

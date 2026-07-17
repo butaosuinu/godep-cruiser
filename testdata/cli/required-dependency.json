@@ -1,0 +1,16 @@
+{
+  "required": [
+    {
+      "name": "handler-requires-logging",
+      "comment": "import the logging package",
+      "severity": "error",
+      "from": {
+        "path": ["^internal/handler/"]
+      },
+      "to": {
+        "path": ["^internal/logging$"],
+        "dependencyTypes": ["local"]
+      }
+    }
+  ]
+}
