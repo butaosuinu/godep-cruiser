@@ -181,9 +181,9 @@ module root) and reports one violation per distinct local package edge. A
 folder-scoped violation has the source package path in `from.path`, line `0`,
 an empty package name, and a local target package with no raw import path.
 Folder scope is available only to forbidden rules. It rejects
-`dependencyTypes`, `dependencyTypesNot`, `from.orphan`, `from.packageName`, and
-`to.reachable`; dependent-count conditions and `from.path` capture references
-in `to` remain available.
+`dependencyTypes`, `dependencyTypesNot`, `from.orphan`, `from.packageName`,
+`to.reachable`, and `to.reachableFilePathNot`; dependent-count conditions and
+`from.path` capture references in `to` remain available.
 
 Each `required` rule checks every file matching `from` and reports one
 source-only violation when none of that file's imports matches `to`. An
