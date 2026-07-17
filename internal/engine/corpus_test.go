@@ -58,6 +58,7 @@ func corpusConfigurations() map[string]config.Config {
 	moreThanTwo := 2
 	reachable := true
 	unreachable := false
+	moreUnstable := true
 
 	return map[string]config.Config{
 		"baseline-expiry": {
@@ -104,6 +105,23 @@ func corpusConfigurations() map[string]config.Config {
 					DependencyTypes: []config.DependencyType{config.DependencyTypeLocal},
 				},
 			}},
+		},
+		"more-unstable": {
+			Forbidden: []config.ForbiddenRule{
+				{
+					Name:     "module-more-unstable",
+					Severity: config.SeverityError,
+					From:     config.From{Path: []string{`^internal/source/`}},
+					To:       config.To{MoreUnstable: &moreUnstable},
+				},
+				{
+					Name:     "folder-more-unstable",
+					Severity: config.SeverityError,
+					Scope:    config.ScopeFolder,
+					From:     config.From{Path: []string{`^internal/source$`}},
+					To:       config.To{MoreUnstable: &moreUnstable},
+				},
+			},
 		},
 		"number-of-dependents": {
 			Forbidden: []config.ForbiddenRule{
@@ -271,6 +289,28 @@ func assertCorpusViolationShapes(t *testing.T, fixtureID string, violations []Vi
 			}
 			if violation.To.Type != scanner.DependencyTypeLocal {
 				t.Errorf("folder-scope corpus violation dependency type = %q, want %q", violation.To.Type, scanner.DependencyTypeLocal)
+			}
+		}
+	case "more-unstable":
+		for _, violation := range violations {
+			if violation.Kind != ViolationKindForbidden || violation.To == nil || violation.To.Type != scanner.DependencyTypeLocal {
+				t.Errorf("more-unstable corpus violation = %#v, want forbidden local edge", violation)
+				continue
+			}
+			switch violation.Rule {
+			case "folder-more-unstable":
+				if violation.From.Path != "internal/source" || violation.From.Line != 0 ||
+					violation.From.PackageName != "" || violation.To.ImportPath != "" {
+					t.Errorf("folder more-unstable violation = %#v, want package edge coordinates", violation)
+				}
+			case "module-more-unstable":
+				if violation.From.Path != "internal/source/source.go" || violation.From.Line != 6 ||
+					violation.From.PackageName != "source" ||
+					violation.To.ImportPath != "example.test/more-unstable/internal/more" {
+					t.Errorf("module more-unstable violation = %#v, want source import coordinates", violation)
+				}
+			default:
+				t.Errorf("more-unstable corpus rule = %q, want module or folder rule", violation.Rule)
 			}
 		}
 	}

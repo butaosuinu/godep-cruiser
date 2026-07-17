@@ -5,9 +5,9 @@ Validate dependency rules for Go source trees.
 godep-cruiser is a clean-room Go reimplementation of the concepts in
 [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) by
 Sander Verweij — forbidden/allowed/required rules with regex `path` / `pathNot`
-matching, transitive reachability and package fan-in checks, dependency-type
-classification (stdlib / in-module / third-party / unresolved), and a violation
-baseline.
+matching, transitive reachability, package fan-in, and instability checks,
+dependency-type classification (stdlib / in-module / third-party / unresolved),
+and a violation baseline.
 It adds one thing the original does not have: stale baseline entries fail
 the run, so grandfathered exceptions expire automatically when the
 violation they cover disappears.
@@ -195,6 +195,15 @@ violation per matching file. In folder scope, `to: {}` matches every outgoing
 local package edge, so the condition filters source packages and an importless
 package produces no violation. Required rules do not accept dependent-count
 conditions.
+
+A forbidden rule can set `to.moreUnstable: true` to match a local edge only
+when the target package is strictly more unstable than the source package.
+Package instability is `FanOut / (FanIn + FanOut)` over distinct local package
+edges with self-edges excluded; a zero denominator is defined as `0`. Equal
+values do not match, and stdlib, third-party, and unresolved dependencies never
+match. The field is available in module and folder scope, but `false`, allowed
+or required rules, `reachable`, a `dependencyTypes` list without `local`, and a
+`dependencyTypesNot` list containing `local` are rejected.
 
 ## Library API
 

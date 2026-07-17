@@ -115,12 +115,12 @@ type From struct {
 // in the local dependency graph for reachable and folder-scoped forbidden
 // rules. Folder scope uses module-relative package paths. Pattern and
 // dependency-type slices use OR semantics within a field and AND semantics
-// across fields. Reachable is a pointer so an omitted condition differs from
-// false.
+// across fields. Pointer fields distinguish omitted conditions from false.
 type To struct {
 	Path               []string         `json:"path,omitempty"`
 	PathNot            []string         `json:"pathNot,omitempty"`
 	Reachable          *bool            `json:"reachable,omitempty"`
+	MoreUnstable       *bool            `json:"moreUnstable,omitempty"`
 	DependencyTypes    []DependencyType `json:"dependencyTypes,omitempty"`
 	DependencyTypesNot []DependencyType `json:"dependencyTypesNot,omitempty"`
 }

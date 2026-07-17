@@ -32,6 +32,7 @@ func TestViolationCorpus(t *testing.T) {
 		"folder-scope",
 		"forbidden-import-target",
 		"layer-direction",
+		"more-unstable",
 		"number-of-dependents",
 		"orphan-file",
 		"package-main-placement",
