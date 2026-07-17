@@ -212,7 +212,7 @@ var htmlReportTemplate = template.Must(template.New("report").Parse(`<!doctype h
               <td>{{.Rule}}</td>
               <td><span class="severity" data-severity="{{.Severity}}">{{.Severity}}</span></td>
               <td>{{.Kind}}</td>
-              <td><code>{{.From.Path}}:{{.From.Line}}</code></td>
+              <td><code>{{.From.Path}}{{if .From.Line}}:{{.From.Line}}{{end}}</code></td>
               <td>{{with .To}}<code>{{.Path}}</code>{{if .Type}} ({{.Type}}){{end}}{{else}}source-only{{end}}</td>
               <td>{{if .Comment}}{{.Comment}}{{else}}&mdash;{{end}}</td>
             </tr>{{end}}

@@ -73,6 +73,21 @@ func TestWriteHTMLReport(t *testing.T) {
 			checkOrder: true,
 		},
 		{
+			name: "folder violation omits nonexistent line zero",
+			report: Report{Violations: []engine.Violation{{
+				Rule:     "package-boundary",
+				Severity: "error",
+				Kind:     engine.ViolationKindForbidden,
+				From:     engine.Source{Path: "internal/app"},
+				To:       &engine.Dependency{Path: "internal/core", Type: "local"},
+			}}},
+			want: []string{
+				"<td><code>internal/app</code></td>",
+				"<code>internal/core</code> (local)",
+			},
+			wantAbsent: []string{"internal/app:0"},
+		},
+		{
 			name:   "empty report remains a complete page",
 			report: Report{},
 			want: []string{
