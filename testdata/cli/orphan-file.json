@@ -1,0 +1,12 @@
+{
+  "forbidden": [
+    {
+      "name": "no-orphans",
+      "severity": "error",
+      "from": {
+        "orphan": true
+      },
+      "to": {}
+    }
+  ]
+}

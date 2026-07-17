@@ -1,0 +1,5 @@
+digraph violations {
+  rankdir=LR;
+  node [shape=box];
+  no_violations [label="No violations"];
+}

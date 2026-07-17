@@ -31,13 +31,19 @@ Save a rule configuration as `godep-cruiser.json` (the complete example in
 godep-cruiser --config godep-cruiser.json --scan-root .
 ```
 
-Human-readable `err` output is the default. JSON and Mermaid are selected
-explicitly:
+Human-readable `err` output is the default. JSON, Mermaid, and GraphViz DOT
+are selected explicitly:
 
 ```sh
 godep-cruiser --config godep-cruiser.json --scan-root . --output-type json
 godep-cruiser --config godep-cruiser.json --scan-root . --output-type mermaid
+godep-cruiser --config godep-cruiser.json --scan-root . --output-type dot
 ```
+
+Mermaid and DOT visualize only the violation-induced subgraph because a
+validation result does not contain non-violating dependencies. Edge violations
+are labeled edges, source-only violations are attached to highlighted source
+nodes, and stale baseline entries are independent highlighted nodes.
 
 In JSON reports, `violations[].kind` is one of:
 

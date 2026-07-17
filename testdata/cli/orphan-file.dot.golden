@@ -1,0 +1,5 @@
+digraph violations {
+  rankdir=LR;
+  node [shape=box];
+  n0 [label="internal/lonely/lonely.go (no-orphans [error] @ line 1)", color="#cf222e", fillcolor="#ffebe9", penwidth=2, style="filled"];
+}
