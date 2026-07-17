@@ -168,6 +168,11 @@
           "type": "boolean",
           "description": "Matches packages by transitive reachability in the local dependency graph. True reports reachable targets; false reports unreachable targets."
         },
+        "moreUnstable": {
+          "type": "boolean",
+          "const": true,
+          "description": "Matches a local dependency only when its package instability is strictly greater than the source package instability."
+        },
         "dependencyTypes": {
           "type": "array",
           "minItems": 1,
@@ -199,8 +204,34 @@
                 "required": [
                   "dependencyTypesNot"
                 ]
+              },
+              {
+                "required": [
+                  "moreUnstable"
+                ]
               }
             ]
+          }
+        },
+        "moreUnstable": {
+          "not": {
+            "required": [
+              "reachable"
+            ]
+          },
+          "properties": {
+            "dependencyTypes": {
+              "contains": {
+                "const": "local"
+              }
+            },
+            "dependencyTypesNot": {
+              "not": {
+                "contains": {
+                  "const": "local"
+                }
+              }
+            }
           }
         }
       }

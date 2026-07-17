@@ -141,9 +141,11 @@ allowed 未一致違反の rule 名は予約名 `not-in-allowed` に固定し、
 同じフィールド内の配列要素は OR、異なるフィールド間は AND として評価する。
 正規表現フィールドに単一文字列、`null`、空配列を指定した設定は受理しない。
 `dependencyTypes` と `dependencyTypesNot` も配列とし、値を `stdlib`、`local`、`module`、`unresolved` に限定する。
-`reachable` は forbidden の `to` だけで受理し、allowed と required では拒否する。
+`reachable` と `moreUnstable` は forbidden の `to` だけで受理し、allowed と required では拒否する。
 `reachable` を指定する場合は `to.path` を必須とし、local graph と両立しない `dependencyTypes` と `dependencyTypesNot` の併用を拒否する。
 `to.pathNot` は `reachable` と併用できる。
+`moreUnstable` は `true` だけを受理し、`reachable` との併用を拒否する。
+`moreUnstable` と併用する `dependencyTypes` は `local` を含まなければならず、`dependencyTypesNot` は `local` を含んではならない。
 
 `to.path` と `to.pathNot` では、`from.path` の capture group を `$1`、`$2` のように参照できる。
 複数の `from.path` が一致した場合は、宣言順で最初に一致した正規表現の capture を使う。
@@ -257,7 +259,7 @@ stdlib、third-party、unresolved は edge に含めない。
 
 forward と reverse の到達閉包は、既知の seed package を含む multi-source BFS として計算する。
 engine はファイルごとの orphan と package 単位の direct dependent 数を `fileFacts` に集約し、from matcher に渡す。
-この境界により、reachable と numberOfDependents は scanner の file edge を個別に再集約せず、同じ package 依存グラフを利用できる。
+この境界により、reachable、numberOfDependents、moreUnstable は scanner の file edge を個別に再集約せず、同じ package 依存グラフを利用できる。
 
 ### folder scope(v0.3)
 
@@ -301,8 +303,27 @@ folder scope の `to: {}` は全 direct package edge に一致するため、dep
 `to` に edge 条件がある forbidden ルールと allowed ルールでは、dependent 数条件を importing file 側の絞り込みとして使う。
 required ルールの `from` は v0.2 の既存契約どおり `path`、`pathNot`、`packageName` に限定する。
 
-`moreUnstable` は v0.3 へ見送る。
-package graph の fan-in と fan-out から instability を計算できるが、ゼロ除算時の値と import 元から import 先への比較方向を先に定義する必要があり、from 単体の dependent 数条件とは設定意味論が異なるためである。
+### moreUnstable(v0.3)
+
+**moreUnstable** は、forbidden の依存 edge が自分より不安定な local package を向いているかを `to` 条件として照合する。
+package `p` の instability は `I(p) = FanOut(p) / (FanIn(p) + FanOut(p))` と定義する。
+`FanIn` と `FanOut` は package 粒度の distinct local edge を数え、self-edge を除外する既存の package graph の値を使う。
+
+分母が 0 の package は `I(p) = 0` とし、最安定側に置く。
+ただし、実際に評価する local edge `from -> to` では、その edge 自体が from 側の `FanOut` と to 側の `FanIn` に寄与するため、両 package の分母は 0 にならない。
+ゼロ除算規約は、孤立 package や未知の package identity を単独で評価する縮退時の値を定める。
+
+local edge `from -> to` は `I(to) > I(from)` のときだけ `moreUnstable` に一致する。
+比較は厳密不等号であり、同じ instability の package への依存は一致しない。
+stdlib、third-party module、unresolved は local package graph 上の instability を持たないため、常に不一致とする。
+
+loader は forbidden の `to.moreUnstable: true` だけを受理し、`false` は将来の意味を予約するため拒否する。
+`reachable` との併用も拒否する。
+`dependencyTypes` が `local` を含まない設定と、`dependencyTypesNot` が `local` を含む設定は、成立し得ないルールとして拒否する。
+
+module scope では個々の source import edge を評価し、違反と baseline は raw import path を使う従来の edge identity を維持する。
+folder scope では distinct package edge を評価し、違反と baseline は import 元と import 先の module-relative package path を使う。
+どちらの scope でも違反 kind は `forbidden` とし、v0.3 では計算した instability の値を違反メッセージと JSON に追加しない。
 
 ### 自動失効: baseline の 3 状態セマンティクス
 
@@ -440,7 +461,7 @@ baseline-known 違反は既存 reporter の契約どおり出力しない。
 | required ルール / reachable / numberOfDependents 系 | OUT | v0.2 で IN |
 | cache | OUT | 10k ファイルの実測は 766.7 ms/op で再検討閾値未満。失効条件が不完全な cache は fail-closed 方針と矛盾するため見送る |
 | folder scope | OUT | v0.3 で IN |
-| metrics(instability)/ ancestor | OUT | moreUnstable は v0.3 候補 |
+| metrics(instability)/ ancestor | OUT | moreUnstable は v0.3 で IN、ancestor は OUT |
 | dot / HTML / CSV / teamcity reporter | OUT | |
 | circular | OUT(恒久) | |
 

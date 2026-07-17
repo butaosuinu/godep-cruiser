@@ -38,6 +38,7 @@ func TestLoadValidConfiguration(t *testing.T) {
       "to": {
         "path": ["^internal/$1/"],
         "pathNot": ["^vendor/$1/"],
+        "moreUnstable": true,
         "dependencyTypes": ["stdlib", "local", "module", "unresolved"],
         "dependencyTypesNot": ["unresolved"]
       }
@@ -114,6 +115,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 				if len(allFields.To.DependencyTypes) != 4 || len(allFields.To.DependencyTypesNot) != 1 {
 					t.Errorf("dependency types not loaded: %#v", allFields.To)
 				}
+				if allFields.To.MoreUnstable == nil || !*allFields.To.MoreUnstable {
+					t.Errorf("MoreUnstable = %v, want pointer to true", allFields.To.MoreUnstable)
+				}
 				if len(got.Allowed) != 1 || got.Allowed[0].Name != "allow-local" {
 					t.Errorf("Allowed = %#v", got.Allowed)
 				} else {
@@ -162,6 +166,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 				if got.Forbidden[0].To.Reachable != nil {
 					t.Errorf("default Reachable = %v, want nil", got.Forbidden[0].To.Reachable)
 				}
+				if got.Forbidden[0].To.MoreUnstable != nil {
+					t.Errorf("default MoreUnstable = %v, want nil", got.Forbidden[0].To.MoreUnstable)
+				}
 				if got.AllowedSeverity != SeverityWarn {
 					t.Errorf("default AllowedSeverity = %q, want %q", got.AllowedSeverity, SeverityWarn)
 				}
@@ -177,7 +184,7 @@ func TestLoadValidConfiguration(t *testing.T) {
       "numberOfDependentsLessThan": 3,
       "numberOfDependentsMoreThan": 0
     },
-    "to": {"path": ["^internal/"]}
+    "to": {"moreUnstable": true}
   }]
 }`,
 			check: func(t *testing.T, got *Config) {
@@ -191,6 +198,9 @@ func TestLoadValidConfiguration(t *testing.T) {
 					rule.From.NumberOfDependentsMoreThan == nil ||
 					*rule.From.NumberOfDependentsMoreThan != 0 {
 					t.Errorf("folder fan-in conditions = %#v, want less than 3 and more than 0", rule.From)
+				}
+				if rule.To.MoreUnstable == nil || !*rule.To.MoreUnstable {
+					t.Errorf("folder MoreUnstable = %v, want pointer to true", rule.To.MoreUnstable)
 				}
 			},
 		},
@@ -360,12 +370,20 @@ func TestLoadRejectsInvalidConfigurationWithPosition(t *testing.T) {
 		{name: "unknown to field", input: validRule(`"to":{"couldNotResolve":true}`), wantPath: "$.forbidden[0].to.couldNotResolve", wantText: `unknown field "couldNotResolve"`},
 		{name: "allowed reachable is unsupported", input: `{"allowed":[{"name":"x","from":{},"to":{"path":["a"],"reachable":true}}]}`, wantPath: "$.allowed[0].to.reachable", wantText: `unknown field "reachable"`},
 		{name: "required reachable is unsupported", input: `{"required":[{"name":"x","from":{},"to":{"path":["a"],"reachable":true}}]}`, wantPath: "$.required[0].to.reachable", wantText: `unknown field "reachable"`},
+		{name: "allowed moreUnstable is unsupported", input: `{"allowed":[{"name":"x","from":{},"to":{"moreUnstable":true}}]}`, wantPath: "$.allowed[0].to.moreUnstable", wantText: `unknown field "moreUnstable"`},
+		{name: "required moreUnstable is unsupported", input: `{"required":[{"name":"x","from":{},"to":{"moreUnstable":true}}]}`, wantPath: "$.required[0].to.moreUnstable", wantText: `unknown field "moreUnstable"`},
 		{name: "reachable must be boolean", input: validRule(`"to":{"path":["a"],"reachable":null}`), wantPath: "$.forbidden[0].to.reachable", wantText: "must be a boolean"},
 		{name: "reachable false requires path", input: validRule(`"to":{"pathNot":["a"],"reachable":false}`), wantPath: "$.forbidden[0].to", wantText: `field "reachable" requires field "path"`},
 		{name: "reachable rejects dependency types", input: validRule(`"to":{"path":["a"],"reachable":true,"dependencyTypes":["local"]}`), wantPath: "$.forbidden[0].to.dependencyTypes", wantText: `cannot be combined with "reachable"`},
 		{name: "reachable false rejects excluded dependency types", input: validRule(`"to":{"path":["a"],"reachable":false,"dependencyTypesNot":["unresolved"]}`), wantPath: "$.forbidden[0].to.dependencyTypesNot", wantText: `cannot be combined with "reachable"`},
 		{name: "reachable false rejects path capture", input: `{"forbidden":[{"name":"x","from":{"path":["^cmd/([^/]+)/"]},"to":{"path":["^internal/$1/"],"reachable":false}}]}`, wantPath: "$.forbidden[0].to.path[0]", wantText: "capture references are not allowed with reachable: false"},
 		{name: "reachable false rejects pathNot capture", input: `{"forbidden":[{"name":"x","from":{"path":["^cmd/([^/]+)/"]},"to":{"path":["^internal/"],"pathNot":["^internal/$1/"],"reachable":false}}]}`, wantPath: "$.forbidden[0].to.pathNot[0]", wantText: "capture references are not allowed with reachable: false"},
+		{name: "moreUnstable must be boolean", input: validRule(`"to":{"moreUnstable":null}`), wantPath: "$.forbidden[0].to.moreUnstable", wantText: "must be a boolean"},
+		{name: "moreUnstable false is reserved", input: validRule(`"to":{"moreUnstable":false}`), wantPath: "$.forbidden[0].to.moreUnstable", wantText: "must be true when specified"},
+		{name: "moreUnstable rejects reachable true", input: validRule(`"to":{"path":["a"],"reachable":true,"moreUnstable":true}`), wantPath: "$.forbidden[0].to.reachable", wantText: `cannot be combined with "moreUnstable"`},
+		{name: "moreUnstable rejects reachable false", input: validRule(`"to":{"path":["a"],"reachable":false,"moreUnstable":true}`), wantPath: "$.forbidden[0].to.reachable", wantText: `cannot be combined with "moreUnstable"`},
+		{name: "moreUnstable requires local dependency type", input: validRule(`"to":{"moreUnstable":true,"dependencyTypes":["stdlib","module"]}`), wantPath: "$.forbidden[0].to.dependencyTypes", wantText: `must include "local"`},
+		{name: "moreUnstable rejects excluded local dependency type", input: validRule(`"to":{"moreUnstable":true,"dependencyTypesNot":["local"]}`), wantPath: "$.forbidden[0].to.dependencyTypesNot", wantText: `must not include "local"`},
 		{name: "path must be array", input: validRule(`"from":{"path":"^cmd/"}`), wantPath: "$.forbidden[0].from.path", wantText: "must be an array"},
 		{name: "path cannot be empty array", input: validRule(`"from":{"path":[]}`), wantPath: "$.forbidden[0].from.path", wantText: "at least one item"},
 		{name: "path items must be strings", input: validRule(`"from":{"path":[null]}`), wantPath: "$.forbidden[0].from.path[0]", wantText: "must be a string"},
@@ -697,7 +715,7 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 		{name: "from", properties: schema.Definitions["from"].Properties, want: []string{"path", "pathNot", "orphan", "packageName", "numberOfDependentsLessThan", "numberOfDependentsMoreThan"}},
 		{name: "required from", properties: schema.Definitions["requiredFrom"].Properties, want: []string{"path", "pathNot", "packageName"}},
 		{name: "to", properties: schema.Definitions["to"].Properties, want: []string{"path", "pathNot", "dependencyTypes", "dependencyTypesNot"}},
-		{name: "forbidden to", properties: schema.Definitions["forbiddenTo"].Properties, want: []string{"path", "pathNot", "reachable", "dependencyTypes", "dependencyTypesNot"}},
+		{name: "forbidden to", properties: schema.Definitions["forbiddenTo"].Properties, want: []string{"path", "pathNot", "reachable", "moreUnstable", "dependencyTypes", "dependencyTypesNot"}},
 		{name: "forbidden rule", properties: schema.Definitions["forbiddenRule"].Properties, want: []string{"name", "comment", "severity", "scope", "from", "to"}},
 		{name: "required rule", properties: schema.Definitions["requiredRule"].Properties, want: []string{"name", "comment", "severity", "from", "to"}},
 		{name: "allowed rule", properties: schema.Definitions["allowedRule"].Properties, want: []string{"name", "comment", "from", "to"}},
@@ -855,6 +873,16 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 	if reachableProperty.Type != "boolean" {
 		t.Errorf("forbiddenTo reachable type = %q, want boolean", reachableProperty.Type)
 	}
+	var moreUnstableProperty struct {
+		Type  string `json:"type"`
+		Const *bool  `json:"const"`
+	}
+	if err := json.Unmarshal(schema.Definitions["forbiddenTo"].Properties["moreUnstable"], &moreUnstableProperty); err != nil {
+		t.Fatalf("decode forbiddenTo moreUnstable property: %v", err)
+	}
+	if moreUnstableProperty.Type != "boolean" || moreUnstableProperty.Const == nil || !*moreUnstableProperty.Const {
+		t.Errorf("forbiddenTo moreUnstable schema = %#v, want boolean const true", moreUnstableProperty)
+	}
 
 	ruleToTests := []struct {
 		definition string
@@ -898,11 +926,42 @@ func TestPublishedSchemaCoversConfigFields(t *testing.T) {
 			conflicts[condition.Required[0]] = true
 		}
 	}
-	if len(conflicts) != 2 || !conflicts["dependencyTypes"] || !conflicts["dependencyTypesNot"] {
+	if len(conflicts) != 3 || !conflicts["moreUnstable"] || !conflicts["dependencyTypes"] || !conflicts["dependencyTypesNot"] {
 		t.Errorf(
-			"reachable conflicting fields = %v, want dependencyTypes and dependencyTypesNot",
+			"reachable conflicting fields = %v, want moreUnstable, dependencyTypes, and dependencyTypesNot",
 			conflicts,
 		)
+	}
+
+	var moreUnstableDependencies struct {
+		Not struct {
+			Required []string `json:"required"`
+		} `json:"not"`
+		Properties map[string]struct {
+			Contains struct {
+				Const string `json:"const"`
+			} `json:"contains"`
+			Not struct {
+				Contains struct {
+					Const string `json:"const"`
+				} `json:"contains"`
+			} `json:"not"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(
+		schema.Definitions["forbiddenTo"].DependentSchemas["moreUnstable"],
+		&moreUnstableDependencies,
+	); err != nil {
+		t.Fatalf("decode forbiddenTo moreUnstable dependencies: %v", err)
+	}
+	if strings.Join(moreUnstableDependencies.Not.Required, ",") != "reachable" {
+		t.Errorf("moreUnstable conflicting fields = %q, want reachable", moreUnstableDependencies.Not.Required)
+	}
+	if got := moreUnstableDependencies.Properties["dependencyTypes"].Contains.Const; got != "local" {
+		t.Errorf("moreUnstable dependencyTypes contains = %q, want local", got)
+	}
+	if got := moreUnstableDependencies.Properties["dependencyTypesNot"].Not.Contains.Const; got != "local" {
+		t.Errorf("moreUnstable dependencyTypesNot exclusion = %q, want local", got)
 	}
 
 	var requiredTo struct {

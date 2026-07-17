@@ -81,6 +81,7 @@ and compare them with the golden list.
 | `baseline-expiry` | A raw-path baseline match preserves the live violation's configured severity while a removed import becomes a stale error with an exact deletion diagnostic. |
 | `folder-scope` | Duplicate file imports collapse to one violation per forbidden local package edge, and package-path baseline identities cover unmatched, known, and stale states. |
 | `layer-direction` | Core may import core and a pinned migration file may import infra, but another core-to-infra edge is rejected. |
+| `more-unstable` | Module and folder scopes report a dependency only when the target package has strictly greater instability; equal local and non-local edges remain positive controls. |
 | `number-of-dependents` | Files in the leaf package are reported below two direct dependent packages, while importer file splitting and a same-directory external test import do not inflate the hub count. |
 | `stdlib-denylist-exception` | Exact stdlib bans honor a package/import exception without exempting sibling imports. |
 | `third-party-in-core` | Core rejects a third-party module dependency. |
@@ -98,7 +99,7 @@ ninth case and is owned by issue #6; `required-dependency` is the tenth and is
 owned by issue #24; `number-of-dependents` is the eleventh and is owned by
 issue #28; the reachable and unreachable cases are the twelfth and thirteenth
 and are owned by issue #27; `folder-scope` is the fourteenth and is owned by
-issue #39. They are inspired by
-fanout's architecture checks but are not a one-to-one copy of its test
-functions; filesystem tree-shape checks remain outside the import graph's
+issue #39; `more-unstable` is the fifteenth and is owned by issue #40. They are
+inspired by fanout's architecture checks but are not a one-to-one copy of its
+test functions; filesystem tree-shape checks remain outside the import graph's
 scope.

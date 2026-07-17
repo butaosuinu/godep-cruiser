@@ -309,7 +309,7 @@ func (validator configValidator) to(
 		"dependencyTypesNot",
 	}
 	if kind == forbiddenRuleKind {
-		allowedFields = append(allowedFields, "reachable")
+		allowedFields = append(allowedFields, "reachable", "moreUnstable")
 	}
 	fields, err := validator.object(
 		node,
@@ -335,6 +335,26 @@ func (validator configValidator) to(
 	}
 
 	allowCaptures := true
+	if member, ok := fields["moreUnstable"]; ok {
+		moreUnstable, validationErr := validator.boolean(member.value, fieldPath(path, "moreUnstable"))
+		if validationErr != nil {
+			return validationErr
+		}
+		if !moreUnstable {
+			return validator.at(
+				member.value,
+				fieldPath(path, "moreUnstable"),
+				errors.New("must be true when specified"),
+			)
+		}
+		if conflictingMember, ok := fields["reachable"]; ok {
+			return validator.at(
+				conflictingMember.value,
+				fieldPath(path, "reachable"),
+				errors.New(`field "reachable" cannot be combined with "moreUnstable"`),
+			)
+		}
+	}
 	if member, ok := fields["reachable"]; ok {
 		reachable, validationErr := validator.boolean(member.value, fieldPath(path, "reachable"))
 		if validationErr != nil {
@@ -375,8 +395,36 @@ func (validator configValidator) to(
 			return err
 		}
 	}
+	if _, ok := fields["moreUnstable"]; ok {
+		if member, specified := fields["dependencyTypes"]; specified &&
+			!dependencyTypeNodeContains(member.value, DependencyTypeLocal) {
+			return validator.at(
+				member.value,
+				fieldPath(path, "dependencyTypes"),
+				errors.New(`must include "local" when combined with "moreUnstable"`),
+			)
+		}
+		if member, specified := fields["dependencyTypesNot"]; specified &&
+			dependencyTypeNodeContains(member.value, DependencyTypeLocal) {
+			return validator.at(
+				member.value,
+				fieldPath(path, "dependencyTypesNot"),
+				errors.New(`must not include "local" when combined with "moreUnstable"`),
+			)
+		}
+	}
 
 	return nil
+}
+
+func dependencyTypeNodeContains(node *jsonNode, want DependencyType) bool {
+	for _, item := range node.items {
+		if DependencyType(item.text) == want {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (validator configValidator) regularExpressions(node *jsonNode, path string) ([]*regexp.Regexp, error) {

@@ -89,7 +89,12 @@ func Evaluate(configuration *config.Config, files []scanner.File) ([]Violation, 
 				continue
 			}
 			for _, dependency := range file.Imports {
-				matched, matchErr := rule.to.matches(dependency, captures)
+				matched, matchErr := rule.to.matchesModuleEdge(
+					dependency,
+					captures,
+					file.PackagePath,
+					packageGraph,
+				)
 				if matchErr != nil {
 					return nil, fmt.Errorf("forbidden rule %q to: %w", rule.name, matchErr)
 				}
@@ -176,7 +181,12 @@ func appendFolderViolations(
 			continue
 		}
 		for _, dependencyPath := range packageGraph.Dependencies(packagePath) {
-			matched, err := rule.to.matchesPackagePath(dependencyPath, captures)
+			matched, err := rule.to.matchesFolderEdge(
+				packagePath,
+				dependencyPath,
+				captures,
+				packageGraph,
+			)
 			if err != nil {
 				return nil, err
 			}

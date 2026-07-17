@@ -1,0 +1,64 @@
+{
+  "name": "moreUnstable: report only dependencies to a strictly more unstable local package",
+  "positiveControls": [
+    {
+      "rule": "folder-more-unstable",
+      "from": {
+        "path": "internal/source",
+        "line": 0
+      },
+      "to": {
+        "path": "internal/equal",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "module-more-unstable",
+      "from": {
+        "path": "internal/source/source.go",
+        "line": 4
+      },
+      "to": {
+        "path": "fmt",
+        "dependencyType": "stdlib"
+      }
+    },
+    {
+      "rule": "module-more-unstable",
+      "from": {
+        "path": "internal/source/source.go",
+        "line": 5
+      },
+      "to": {
+        "path": "internal/equal",
+        "dependencyType": "local"
+      }
+    }
+  ],
+  "violations": [
+    {
+      "rule": "folder-more-unstable",
+      "severity": "error",
+      "from": {
+        "path": "internal/source",
+        "line": 0
+      },
+      "to": {
+        "path": "internal/more",
+        "dependencyType": "local"
+      }
+    },
+    {
+      "rule": "module-more-unstable",
+      "severity": "error",
+      "from": {
+        "path": "internal/source/source.go",
+        "line": 6
+      },
+      "to": {
+        "path": "internal/more",
+        "dependencyType": "local"
+      }
+    }
+  ]
+}

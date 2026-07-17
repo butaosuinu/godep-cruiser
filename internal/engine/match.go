@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/butaosuinu/godep-cruiser/config"
+	"github.com/butaosuinu/godep-cruiser/internal/graph"
 	"github.com/butaosuinu/godep-cruiser/internal/scanner"
 )
 
@@ -29,6 +30,7 @@ type toMatcher struct {
 	dependencyTypes    []config.DependencyType
 	dependencyTypesNot []config.DependencyType
 	reachable          *bool
+	moreUnstable       *bool
 }
 
 type compiledForbiddenRule struct {
@@ -164,6 +166,7 @@ func compileTo(to config.To) toMatcher {
 		dependencyTypes:    to.DependencyTypes,
 		dependencyTypesNot: to.DependencyTypesNot,
 		reachable:          to.Reachable,
+		moreUnstable:       to.MoreUnstable,
 	}
 }
 
@@ -227,6 +230,56 @@ func (matcher toMatcher) matches(dependency scanner.Import, captures []string) (
 	return true, nil
 }
 
+func (matcher toMatcher) matchesModuleEdge(
+	dependency scanner.Import,
+	captures []string,
+	fromPackage string,
+	packageGraph graph.Graph,
+) (bool, error) {
+	matched, err := matcher.matches(dependency, captures)
+	if err != nil || !matched || matcher.moreUnstable == nil {
+		return matched, err
+	}
+	if !*matcher.moreUnstable ||
+		dependency.Type != scanner.DependencyTypeLocal ||
+		dependency.ResolvedPath == "" {
+		return false, nil
+	}
+
+	return isMoreUnstable(packageGraph, fromPackage, dependency.ResolvedPath), nil
+}
+
+func (matcher toMatcher) matchesFolderEdge(
+	fromPackage string,
+	toPackage string,
+	captures []string,
+	packageGraph graph.Graph,
+) (bool, error) {
+	matched, err := matcher.matchesPackagePath(toPackage, captures)
+	if err != nil || !matched || matcher.moreUnstable == nil {
+		return matched, err
+	}
+	if !*matcher.moreUnstable {
+		return false, nil
+	}
+
+	return isMoreUnstable(packageGraph, fromPackage, toPackage), nil
+}
+
+func isMoreUnstable(packageGraph graph.Graph, fromPackage, toPackage string) bool {
+	return instability(packageGraph, toPackage) > instability(packageGraph, fromPackage)
+}
+
+func instability(packageGraph graph.Graph, packagePath string) float64 {
+	fanOut := packageGraph.FanOut(packagePath)
+	degree := packageGraph.FanIn(packagePath) + fanOut
+	if degree == 0 {
+		return 0
+	}
+
+	return float64(fanOut) / float64(degree)
+}
+
 func (matcher toMatcher) matchesPackagePath(packagePath string, captures []string) (bool, error) {
 	if len(matcher.path) > 0 {
 		matched, err := matchesAnyTemplate(matcher.path, packagePath, captures)
@@ -279,7 +332,8 @@ func isEmptyTo(to config.To) bool {
 		len(to.PathNot) == 0 &&
 		len(to.DependencyTypes) == 0 &&
 		len(to.DependencyTypesNot) == 0 &&
-		to.Reachable == nil
+		to.Reachable == nil &&
+		to.MoreUnstable == nil
 }
 
 func effectiveSeverity(severity config.Severity) config.Severity {
