@@ -396,6 +396,206 @@ func TestUnreachableForbiddenRule(t *testing.T) {
 	}
 }
 
+func TestReachableFilePathFilter(t *testing.T) {
+	t.Parallel()
+
+	reachable := true
+	localImport := func(target string) scanner.Import {
+		return scanner.Import{
+			Path:         "example.com/project/" + target,
+			ResolvedPath: target,
+			Type:         scanner.DependencyTypeLocal,
+			Line:         3,
+		}
+	}
+	files := []scanner.File{
+		{
+			Path:        "cmd/app/main.go",
+			PackagePath: "cmd/app",
+			Package:     "main",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/service")},
+		},
+		{
+			Path:        "internal/service/service.go",
+			PackagePath: "internal/service",
+			Package:     "service",
+			PackageLine: 1,
+		},
+		{
+			Path:        "internal/service/service_test.go",
+			PackagePath: "internal/service",
+			Package:     "service",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/testutil")},
+		},
+		{
+			Path:        "internal/testutil/testutil.go",
+			PackagePath: "internal/testutil",
+			Package:     "testutil",
+			PackageLine: 1,
+		},
+	}
+	tests := []struct {
+		name                  string
+		reachableFilePathNot  []string
+		productionAlsoImports bool
+		targetPattern         string
+		wantTarget            string
+		wantViolationCount    int
+	}{
+		{
+			name:               "unfiltered closure includes test edge",
+			wantViolationCount: 1,
+		},
+		{
+			name:                 "test file provenance can be excluded",
+			reachableFilePathNot: []string{`_test\.go$`},
+		},
+		{
+			name:                  "mixed production provenance keeps edge",
+			reachableFilePathNot:  []string{`_test\.go$`},
+			productionAlsoImports: true,
+			wantViolationCount:    1,
+		},
+		{
+			name:                 "nonmatching exclusion keeps edge",
+			reachableFilePathNot: []string{`^vendor/`},
+			wantViolationCount:   1,
+		},
+		{
+			name:                 "initiating import remains the from selector responsibility",
+			reachableFilePathNot: []string{`^cmd/app/main\.go$`},
+			targetPattern:        `^internal/service$`,
+			wantTarget:           "internal/service",
+			wantViolationCount:   1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			caseFiles := slices.Clone(files)
+			if test.productionAlsoImports {
+				caseFiles[1].Imports = []scanner.Import{localImport("internal/testutil")}
+			}
+			targetPattern := test.targetPattern
+			wantTarget := test.wantTarget
+			if targetPattern == "" {
+				targetPattern = `^internal/testutil$`
+				wantTarget = "internal/testutil"
+			}
+			configuration := config.Config{Forbidden: []config.ForbiddenRule{{
+				Name:     "production-no-testutil",
+				Severity: config.SeverityError,
+				From:     config.From{Path: []string{`^cmd/app/main\.go$`}},
+				To: config.To{
+					Path:                 []string{targetPattern},
+					Reachable:            &reachable,
+					ReachableFilePathNot: test.reachableFilePathNot,
+				},
+			}}}
+
+			got, err := Evaluate(&configuration, caseFiles)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if len(got) != test.wantViolationCount {
+				t.Fatalf("Evaluate() violations = %#v, want count %d", got, test.wantViolationCount)
+			}
+			if len(got) == 1 && (got[0].From.Path != "cmd/app/main.go" ||
+				got[0].From.Line != 3 || got[0].To == nil || got[0].To.Path != wantTarget) {
+				t.Errorf("Evaluate() violation = %#v, want cmd/app/main.go:3 -> %s", got[0], wantTarget)
+			}
+		})
+	}
+}
+
+func TestUnreachableFilePathFilter(t *testing.T) {
+	t.Parallel()
+
+	reachable := false
+	localImport := func(target string) scanner.Import {
+		return scanner.Import{
+			Path:         "example.com/project/" + target,
+			ResolvedPath: target,
+			Type:         scanner.DependencyTypeLocal,
+			Line:         3,
+		}
+	}
+	files := []scanner.File{
+		{
+			Path:        "cmd/app/main.go",
+			PackagePath: "cmd/app",
+			Package:     "main",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/live")},
+		},
+		{
+			Path:        "internal/live/live.go",
+			PackagePath: "internal/live",
+			Package:     "live",
+			PackageLine: 1,
+		},
+		{
+			Path:        "internal/live/live_test.go",
+			PackagePath: "internal/live",
+			Package:     "live",
+			PackageLine: 1,
+			Imports:     []scanner.Import{localImport("internal/dead")},
+		},
+		{
+			Path:        "internal/dead/dead.go",
+			PackagePath: "internal/dead",
+			Package:     "dead",
+			PackageLine: 1,
+		},
+	}
+	tests := []struct {
+		name                 string
+		reachableFilePathNot []string
+		wantViolationCount   int
+	}{
+		{name: "unfiltered closure hides test-reachable dead code"},
+		{
+			name:                 "test file provenance exposes dead code",
+			reachableFilePathNot: []string{`_test\.go$`},
+			wantViolationCount:   1,
+		},
+		{name: "nonmatching exclusion keeps test edge", reachableFilePathNot: []string{`^vendor/`}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			configuration := config.Config{Forbidden: []config.ForbiddenRule{{
+				Name:     "entrypoint-reaches-production",
+				Severity: config.SeverityError,
+				From:     config.From{Path: []string{`^cmd/app/`}},
+				To: config.To{
+					Path:                 []string{`^internal/dead$`},
+					Reachable:            &reachable,
+					ReachableFilePathNot: test.reachableFilePathNot,
+				},
+			}}}
+
+			got, err := Evaluate(&configuration, files)
+			if err != nil {
+				t.Fatalf("Evaluate() error = %v", err)
+			}
+			if len(got) != test.wantViolationCount {
+				t.Fatalf("Evaluate() violations = %#v, want count %d", got, test.wantViolationCount)
+			}
+			if len(got) == 1 && (got[0].Kind != ViolationKindUnreachable ||
+				got[0].From.Path != "internal/dead/dead.go" || got[0].To != nil) {
+				t.Errorf("Evaluate() violation = %#v, want source-only unreachable internal/dead/dead.go", got[0])
+			}
+		})
+	}
+}
+
 func TestRequiredDependencies(t *testing.T) {
 	t.Parallel()
 
@@ -1080,6 +1280,15 @@ func TestEvaluateRejectsInvalidProgrammaticConfiguration(t *testing.T) {
 				Name: "invalid-to", From: config.From{}, To: config.To{Path: []string{"("}},
 			}}},
 			wantError: "expanded",
+		},
+		{
+			name: "invalid reachable file path regexp",
+			configuration: &config.Config{Forbidden: []config.ForbiddenRule{{
+				Name: "invalid-reachable-file", From: config.From{}, To: config.To{
+					ReachableFilePathNot: []string{"["},
+				},
+			}}},
+			wantError: "to.reachableFilePathNot",
 		},
 		{
 			name: "unavailable capture",

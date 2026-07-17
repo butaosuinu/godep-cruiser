@@ -25,12 +25,13 @@ type fileFacts struct {
 }
 
 type toMatcher struct {
-	path               []string
-	pathNot            []string
-	dependencyTypes    []config.DependencyType
-	dependencyTypesNot []config.DependencyType
-	reachable          *bool
-	moreUnstable       *bool
+	path                 []string
+	pathNot              []string
+	dependencyTypes      []config.DependencyType
+	dependencyTypesNot   []config.DependencyType
+	reachable            *bool
+	reachableFilePathNot []*regexp.Regexp
+	moreUnstable         *bool
 }
 
 type compiledForbiddenRule struct {
@@ -68,13 +69,22 @@ func compileForbiddenRules(rules []config.ForbiddenRule) ([]compiledForbiddenRul
 		if err != nil {
 			return nil, fmt.Errorf("forbidden[%d] %q: %w", index, rule.Name, err)
 		}
+		reachableFilePathNot, err := compilePatterns(
+			"to.reachableFilePathNot",
+			rule.To.ReachableFilePathNot,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("forbidden[%d] %q: %w", index, rule.Name, err)
+		}
+		to := compileTo(rule.To)
+		to.reachableFilePathNot = reachableFilePathNot
 		compiled = append(compiled, compiledForbiddenRule{
 			name:       rule.Name,
 			comment:    rule.Comment,
 			severity:   severity,
 			scope:      rule.Scope,
 			from:       from,
-			to:         compileTo(rule.To),
+			to:         to,
 			sourceOnly: isSourceOnly(rule.From, rule.To),
 		})
 	}

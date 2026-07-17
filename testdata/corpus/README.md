@@ -89,17 +89,18 @@ and compare them with the golden list.
 | `forbidden-import-target` | Product code rejects imports of a designated entrypoint tree. |
 | `orphan-file` | A disconnected file is reported while connected files are not. |
 | `package-main-placement` | `package main` is rejected outside approved command and tool roots. |
-| `reachable-test-helper` | Of two files in one package, only the file whose initiating import transitively reaches test helpers is rejected. |
+| `reachable-test-helper` | A package test file alone imports a test helper: the unfiltered reachable rule over-detects it, while the rule excluding `_test.go` edge provenance stays clean. |
 | `required-dependency` | Each matching handler file must import the logging package; an importless file violates while a compliant sibling is retained as a positive control. |
 | `unclassified-dependency` | An allowed-rule set fails closed on an unclassified local dependency. |
-| `unreachable-dead-code` | Every file in a package outside the entrypoint package closure is reported while live packages remain clean. |
+| `unreachable-dead-code` | A live package test file alone imports dead code: the unfiltered unreachable rule misses it, while the rule excluding `_test.go` edge provenance reports every dead-package file. |
 
 The first eight semantic cases are owned by issue #4; `baseline-expiry` is the
 ninth case and is owned by issue #6; `required-dependency` is the tenth and is
 owned by issue #24; `number-of-dependents` is the eleventh and is owned by
 issue #28; the reachable and unreachable cases are the twelfth and thirteenth
-and are owned by issue #27; `folder-scope` is the fourteenth and is owned by
-issue #39; `more-unstable` is the fifteenth and is owned by issue #40. They are
+and are owned by issue #27, with their edge-provenance filter coverage owned by
+issue #43; `folder-scope` is the fourteenth and is owned by issue #39;
+`more-unstable` is the fifteenth and is owned by issue #40. They are
 inspired by fanout's architecture checks but are not a one-to-one copy of its
 test functions; filesystem tree-shape checks remain outside the import graph's
 scope.

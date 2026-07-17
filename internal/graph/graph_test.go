@@ -49,6 +49,98 @@ func TestClosures(t *testing.T) {
 	}
 }
 
+func TestForwardClosureWithFilePredicate(t *testing.T) {
+	t.Parallel()
+
+	dependencyGraph := graph.Build(graphFiles())
+	tests := []struct {
+		name       string
+		acceptFile func(string) bool
+		seeds      []string
+		want       []string
+	}{
+		{
+			name:  "nil predicate preserves unfiltered sorted closure",
+			seeds: []string{"internal/a"},
+			want:  []string{"internal/a", "internal/b", "internal/c", "internal/missing"},
+		},
+		{
+			name:       "accepted provenance traverses all edges",
+			acceptFile: func(string) bool { return true },
+			seeds:      []string{"internal/a"},
+			want:       []string{"internal/a", "internal/b", "internal/c", "internal/missing"},
+		},
+		{
+			name:       "all excluded edges are not traversed",
+			acceptFile: func(string) bool { return false },
+			seeds:      []string{"internal/a"},
+			want:       []string{"internal/a"},
+		},
+		{
+			name: "one accepted file retains mixed provenance edge",
+			acceptFile: func(filePath string) bool {
+				return filePath == "internal/a/two.go"
+			},
+			seeds: []string{"internal/a"},
+			want:  []string{"internal/a", "internal/c"},
+		},
+		{
+			name:       "unknown seeds stay ignored",
+			acceptFile: func(string) bool { return true },
+			seeds:      []string{"internal/unknown"},
+		},
+		{
+			name:       "self edge stays excluded",
+			acceptFile: func(string) bool { return true },
+			seeds:      []string{"internal/self"},
+			want:       []string{"internal/self"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := dependencyGraph.ForwardClosureWithFilePredicate(test.acceptFile, test.seeds...)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("ForwardClosureWithFilePredicate() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestForwardClosureFileProvenanceDeduplicatesFilePaths(t *testing.T) {
+	t.Parallel()
+
+	localImport := scanner.Import{
+		Path:         "example.com/project/internal/b",
+		ResolvedPath: "internal/b",
+		Type:         scanner.DependencyTypeLocal,
+	}
+	source := scanner.File{
+		Path:        "internal/a/a.go",
+		PackagePath: "internal/a",
+		Imports:     []scanner.Import{localImport, localImport},
+	}
+	dependencyGraph := graph.Build([]scanner.File{
+		source,
+		source,
+		{Path: "internal/b/b.go", PackagePath: "internal/b"},
+	})
+
+	var checkedPaths []string
+	got := dependencyGraph.ForwardClosureWithFilePredicate(func(filePath string) bool {
+		checkedPaths = append(checkedPaths, filePath)
+
+		return false
+	}, "internal/a")
+	if want := []string{"internal/a"}; !slices.Equal(got, want) {
+		t.Errorf("ForwardClosureWithFilePredicate() = %q, want %q", got, want)
+	}
+	if want := []string{"internal/a/a.go"}; !slices.Equal(checkedPaths, want) {
+		t.Errorf("checked provenance paths = %q, want deduplicated %q", checkedPaths, want)
+	}
+}
+
 func TestDirectViewsAndCounts(t *testing.T) {
 	t.Parallel()
 

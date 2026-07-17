@@ -12,10 +12,16 @@ import (
 // excluded from dependency views, but retained by IsImported for orphan
 // compatibility.
 type Graph struct {
-	forward  map[string]map[string]struct{}
-	reverse  map[string]map[string]struct{}
-	imported map[string]struct{}
+	forward  map[string]packageEdges
+	reverse  map[string]stringSet
+	imported stringSet
 }
+
+type stringSet map[string]struct{}
+
+// packageEdges maps each target package to the source files that form that
+// package-level edge.
+type packageEdges map[string]stringSet
 
 // Build constructs a Graph from scanner files. Local imports are deduplicated
 // at package granularity. Non-local imports do not form graph edges; observed
@@ -23,17 +29,17 @@ type Graph struct {
 // an empty PackagePath are ignored instead of being treated as the root package.
 func Build(files []scanner.File) Graph {
 	graph := Graph{
-		forward:  make(map[string]map[string]struct{}),
-		reverse:  make(map[string]map[string]struct{}),
-		imported: make(map[string]struct{}),
+		forward:  make(map[string]packageEdges),
+		reverse:  make(map[string]stringSet),
+		imported: make(stringSet),
 	}
 	for _, file := range files {
 		packagePath, ok := cleanPackagePath(file.PackagePath)
 		if !ok {
 			continue
 		}
-		graph.forward[packagePath] = make(map[string]struct{})
-		graph.reverse[packagePath] = make(map[string]struct{})
+		graph.forward[packagePath] = make(packageEdges)
+		graph.reverse[packagePath] = make(stringSet)
 	}
 
 	for _, file := range files {
@@ -52,11 +58,16 @@ func Build(files []scanner.File) Graph {
 				continue
 			}
 			if _, known := graph.forward[to]; !known {
-				graph.forward[to] = make(map[string]struct{})
-				graph.reverse[to] = make(map[string]struct{})
+				graph.forward[to] = make(packageEdges)
+				graph.reverse[to] = make(stringSet)
 			}
 
-			graph.forward[from][to] = struct{}{}
+			provenance := graph.forward[from][to]
+			if provenance == nil {
+				provenance = make(stringSet)
+				graph.forward[from][to] = provenance
+			}
+			provenance[file.Path] = struct{}{}
 			graph.reverse[to][from] = struct{}{}
 		}
 	}
@@ -90,13 +101,40 @@ func (graph Graph) Dependencies(packagePath string) []string {
 // ForwardClosure returns the known seed packages and every package reachable
 // from them by following local imports. Unknown seeds are ignored.
 func (graph Graph) ForwardClosure(packagePaths ...string) []string {
-	return graph.closure(graph.forward, packagePaths)
+	return graph.ForwardClosureWithFilePredicate(nil, packagePaths...)
+}
+
+// ForwardClosureWithFilePredicate returns the known seed packages and every
+// package reachable from them through local import edges. An edge is traversed
+// when acceptFile is nil or at least one source file forming that edge is
+// accepted. Unknown seeds are ignored.
+func (graph Graph) ForwardClosureWithFilePredicate(
+	acceptFile func(string) bool,
+	packagePaths ...string,
+) []string {
+	return graph.closure(packagePaths, func(packagePath string) []string {
+		dependencies := sortedKeys(graph.forward[packagePath])
+		if acceptFile == nil {
+			return dependencies
+		}
+
+		accepted := dependencies[:0]
+		for _, dependency := range dependencies {
+			if anyAccepted(graph.forward[packagePath][dependency], acceptFile) {
+				accepted = append(accepted, dependency)
+			}
+		}
+
+		return accepted
+	})
 }
 
 // ReverseClosure returns the known seed packages and every package that can
 // reach them by following local imports in reverse. Unknown seeds are ignored.
 func (graph Graph) ReverseClosure(packagePaths ...string) []string {
-	return graph.closure(graph.reverse, packagePaths)
+	return graph.closure(packagePaths, func(packagePath string) []string {
+		return sortedKeys(graph.reverse[packagePath])
+	})
 }
 
 // FanIn returns the number of distinct direct package-level dependents.
@@ -132,8 +170,8 @@ func (graph Graph) IsImported(packagePath string) bool {
 }
 
 func (graph Graph) closure(
-	edges map[string]map[string]struct{},
 	packagePaths []string,
+	nextPackages func(string) []string,
 ) []string {
 	visited := make(map[string]struct{}, len(packagePaths))
 	queue := make([]string, 0, len(packagePaths))
@@ -155,7 +193,7 @@ func (graph Graph) closure(
 
 	for index := 0; index < len(queue); index++ {
 		current := queue[index]
-		for _, next := range sortedKeys(edges[current]) {
+		for _, next := range nextPackages(current) {
 			if _, seen := visited[next]; seen {
 				continue
 			}
@@ -167,6 +205,10 @@ func (graph Graph) closure(
 	return sortedKeys(visited)
 }
 
+func anyAccepted(filePaths stringSet, acceptFile func(string) bool) bool {
+	return slices.ContainsFunc(sortedKeys(filePaths), acceptFile)
+}
+
 func cleanPackagePath(packagePath string) (string, bool) {
 	if packagePath == "" {
 		return "", false
@@ -175,7 +217,7 @@ func cleanPackagePath(packagePath string) (string, bool) {
 	return path.Clean(packagePath), true
 }
 
-func sortedKeys(set map[string]struct{}) []string {
+func sortedKeys[Value any](set map[string]Value) []string {
 	keys := make([]string, 0, len(set))
 	for key := range set {
 		keys = append(keys, key)

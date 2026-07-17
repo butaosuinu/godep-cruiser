@@ -248,7 +248,7 @@ func appendReachableViolations(
 			if dependency.Type != scanner.DependencyTypeLocal || dependency.ResolvedPath == "" {
 				continue
 			}
-			for _, targetPackage := range packageGraph.ForwardClosure(dependency.ResolvedPath) {
+			for _, targetPackage := range reachableClosure(packageGraph, rule, dependency.ResolvedPath) {
 				matched, err := rule.to.matchesPackagePath(targetPackage, captures)
 				if err != nil {
 					return nil, err
@@ -293,7 +293,7 @@ func appendUnreachableViolations(
 	}
 
 	reachablePackages := make(map[string]struct{})
-	for _, packagePath := range packageGraph.ForwardClosure(seedPackages...) {
+	for _, packagePath := range reachableClosure(packageGraph, rule, seedPackages...) {
 		reachablePackages[packagePath] = struct{}{}
 	}
 	for _, file := range files {
@@ -317,6 +317,20 @@ func appendUnreachableViolations(
 	}
 
 	return violations, nil
+}
+
+func reachableClosure(
+	packageGraph graph.Graph,
+	rule compiledForbiddenRule,
+	seedPackages ...string,
+) []string {
+	if len(rule.to.reachableFilePathNot) == 0 {
+		return packageGraph.ForwardClosure(seedPackages...)
+	}
+
+	return packageGraph.ForwardClosureWithFilePredicate(func(filePath string) bool {
+		return !matchesAny(rule.to.reachableFilePathNot, filePath)
+	}, seedPackages...)
 }
 
 func appendSourceViolations(
