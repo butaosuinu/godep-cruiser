@@ -1,5 +1,7 @@
 # godep-cruiser
 
+[English](README.md) | [日本語](README.ja.md)
+
 Validate dependency rules for Go source trees.
 
 godep-cruiser is a clean-room Go reimplementation of the concepts in
